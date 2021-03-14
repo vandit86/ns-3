@@ -65,14 +65,16 @@
 #include "ns3/network-module.h"
 #include "ns3/csma-module.h"
 #include "ns3/tap-bridge-module.h"
+#include "ns3/internet-module.h"
 
 using namespace ns3;
 
-NS_LOG_COMPONENT_DEFINE ("TapCsmaVirtualMachineExample");
+NS_LOG_COMPONENT_DEFINE ("MPTapCsmaVirtualMachineExample");
 
 int 
 main (int argc, char *argv[])
 {
+  std::cout << "Start simulation "<< std::endl;
   CommandLine cmd (__FILE__);
   cmd.Parse (argc, argv);
 
@@ -92,6 +94,10 @@ main (int argc, char *argv[])
   NodeContainer nodes;
   nodes.Create (2);
 
+  // NodeContainer nodes_2;
+  // nodes_2.Create(2);
+
+
   //
   // Use a CsmaHelper to get a CSMA channel created, and the needed net 
   // devices installed on both of the nodes.  The data rate and delay for the
@@ -100,7 +106,12 @@ main (int argc, char *argv[])
   // ./waf --run "tap=csma-virtual-machine --ns3::CsmaChannel::DataRate=10000000"
   //
   CsmaHelper csma;
+  // csma.SetChannelAttribute ("DataRate", StringValue ("1bps"));
+  // csma.SetChannelAttribute ("Delay", TimeValue (MilliSeconds (100000)));
+  //csma.Install()
   NetDeviceContainer devices = csma.Install (nodes);
+  // csma.SetDeviceAttribute()
+  NetDeviceContainer devices_1 = csma.Install (nodes);
 
   //
   // Use the TapBridgeHelper to connect to the pre-configured tap devices for 
@@ -111,21 +122,35 @@ main (int argc, char *argv[])
   //
   TapBridgeHelper tapBridge;
   tapBridge.SetAttribute ("Mode", StringValue ("UseBridge"));
+  
+  TapBridgeHelper tapBridge_2;
+  tapBridge_2.SetAttribute ("Mode", StringValue ("UseBridge"));
+  
+   
   tapBridge.SetAttribute ("DeviceName", StringValue ("tap-left"));
   tapBridge.Install (nodes.Get (0), devices.Get (0));
+  tapBridge_2.SetAttribute ("DeviceName", StringValue ("tap-left-1"));
+  tapBridge_2.Install (nodes.Get (0), devices_1.Get (0));
   
-
   //
   // Connect the right side tap to the right side CSMA device on the right-side
   // ghost node.
   //
   tapBridge.SetAttribute ("DeviceName", StringValue ("tap-right"));
   tapBridge.Install (nodes.Get (1), devices.Get (1));
+  
+  tapBridge_2.SetAttribute ("DeviceName", StringValue ("tap-right-1"));
+  tapBridge_2.Install (nodes.Get (1), devices_1.Get (1));
 
+  csma.EnablePcapAll("first"); 
   //
   // Run the simulation for ten minutes to give the user time to play around
   //
-  Simulator::Stop (Seconds (600.));
+
+  //ns3::Ipv4GlobalRoutingHelper::PopulateRoutingTables ();
+
+  std::cout << "Stop simulation \n"; 
+  Simulator::Stop (Seconds (600.0));
   Simulator::Run ();
   Simulator::Destroy ();
 }

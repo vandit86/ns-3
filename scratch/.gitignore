@@ -3,3 +3,9 @@
 !.gitignore
 !subdir/
 !scratch-simulator.cc
+!mp-lxc-left.conf
+!mp-lxc-right.conf
+!virtual-network-setup.sh
+!virtual-network-teardown.sh
+!mp-tap-csma-virtual-machine.cc
+
