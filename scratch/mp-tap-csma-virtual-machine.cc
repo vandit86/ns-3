@@ -66,10 +66,35 @@
 #include "ns3/csma-module.h"
 #include "ns3/tap-bridge-module.h"
 #include "ns3/internet-module.h"
+#include "ns3/flow-monitor-helper.h"
+#include "ns3/flow-monitor-module.h"
+#include "ns3/netanim-module.h"
 
 using namespace ns3;
 
 NS_LOG_COMPONENT_DEFINE ("MPTapCsmaVirtualMachineExample");
+
+void ThroughputMonitor (FlowMonitorHelper* fmhelper, Ptr<FlowMonitor> flowMon)
+{
+  flowMon->CheckForLostPackets();
+  std::map<FlowId, FlowMonitor::FlowStats> flowStats = flowMon->GetFlowStats();
+  Ptr<Ipv4FlowClassifier> classing = DynamicCast<Ipv4FlowClassifier> (fmhelper->GetClassifier());
+  for (std::map<FlowId, FlowMonitor::FlowStats>::const_iterator stats = flowStats.begin (); stats != flowStats.end (); ++stats)
+  {
+    Ipv4FlowClassifier::FiveTuple fiveTuple = classing->FindFlow (stats->first);
+    std::cout<<"Flow ID                 : " << stats->first <<" ; "<< fiveTuple.sourceAddress <<" -----> "<<fiveTuple.destinationAddress<<std::endl;
+//  std::cout<<"Tx Packets = " << stats->second.txPackets<<std::endl;
+//  std::cout<<"Rx Packets = " << stats->second.rxPackets<<std::endl;
+    std::cout<<"Duration                : "<<stats->second.timeLastRxPacket.GetSeconds()-stats->second.timeFirstTxPacket.GetSeconds()<<std::endl;
+    std::cout<<"Last Received Packet    : "<< stats->second.timeLastRxPacket.GetSeconds()<<" Seconds"<<std::endl;
+    std::cout<<"Throughput: " << stats->second.rxBytes * 8.0 / (stats->second.timeLastRxPacket.GetSeconds()-stats->second.timeFirstTxPacket.GetSeconds())/1024/1024  << " Mbps"<<std::endl;
+    std::cout<<"---------------------------------------------------------------------------"<<std::endl;
+  }
+
+ // Rescheduling the next call to this function to print throughput
+ Simulator::Schedule(Seconds(3),&ThroughputMonitor, fmhelper, flowMon);
+
+}
 
 int 
 main (int argc, char *argv[])
@@ -106,8 +131,8 @@ main (int argc, char *argv[])
   // ./waf --run "tap=csma-virtual-machine --ns3::CsmaChannel::DataRate=10000000"
   //
   CsmaHelper csma;
-  // csma.SetChannelAttribute ("DataRate", StringValue ("1bps"));
   // csma.SetChannelAttribute ("Delay", TimeValue (MilliSeconds (100000)));
+  //csma.SetChannelAttribute ("DataRate", StringValue ("10Mbps"));
   //csma.Install()
   NetDeviceContainer devices = csma.Install (nodes);
   // csma.SetDeviceAttribute()
@@ -122,15 +147,11 @@ main (int argc, char *argv[])
   //
   TapBridgeHelper tapBridge;
   tapBridge.SetAttribute ("Mode", StringValue ("UseBridge"));
-  
-  TapBridgeHelper tapBridge_2;
-  tapBridge_2.SetAttribute ("Mode", StringValue ("UseBridge"));
-  
    
   tapBridge.SetAttribute ("DeviceName", StringValue ("tap-left"));
   tapBridge.Install (nodes.Get (0), devices.Get (0));
-  tapBridge_2.SetAttribute ("DeviceName", StringValue ("tap-left-1"));
-  tapBridge_2.Install (nodes.Get (0), devices_1.Get (0));
+  tapBridge.SetAttribute ("DeviceName", StringValue ("tap-left-1"));
+  tapBridge.Install (nodes.Get (0), devices_1.Get (0));
   
   //
   // Connect the right side tap to the right side CSMA device on the right-side
@@ -139,18 +160,33 @@ main (int argc, char *argv[])
   tapBridge.SetAttribute ("DeviceName", StringValue ("tap-right"));
   tapBridge.Install (nodes.Get (1), devices.Get (1));
   
-  tapBridge_2.SetAttribute ("DeviceName", StringValue ("tap-right-1"));
-  tapBridge_2.Install (nodes.Get (1), devices_1.Get (1));
+  tapBridge.SetAttribute ("DeviceName", StringValue ("tap-right-1"));
+  tapBridge.Install (nodes.Get (1), devices_1.Get (1));
 
-  csma.EnablePcapAll("first"); 
+  //csma.EnablePcapAll("first"); 
   //
+  // Flow monitor
+  // Ptr<FlowMonitor> flowMonitor;
+  // FlowMonitorHelper flowHelper;
+  // flowMonitor = flowHelper.InstallAll(); 
+
+  // scheduling throughput to be printed every 3 seconds
+  //ThroughputMonitor(&flowHelper, flowMonitor);
+
+
   // Run the simulation for ten minutes to give the user time to play around
   //
 
   //ns3::Ipv4GlobalRoutingHelper::PopulateRoutingTables ();
+  
+  // Create the animation object and configure for specified output
+  //AnimationInterface anim ("mp-anim.xml");
+  //anim.EnablePacketMetadata (); // Optional
 
   std::cout << "Stop simulation \n"; 
   Simulator::Stop (Seconds (600.0));
   Simulator::Run ();
   Simulator::Destroy ();
+  
+  //flowMonitor->SerializeToXmlFile("mp-monitor.xml", true, true);
 }

@@ -30,12 +30,11 @@ ifconfig br-left-1 up
 ifconfig br-right up
 ifconfig br-right-1 up
 
-# show interfaces status 
-brctl show
-
 # Start LXC containers 
 lxc-start -n mp-left
 lxc-start -n mp-right
 
 #show container status 
 lxc-ls -f
+# show interfaces status 
+brctl show
