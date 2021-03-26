@@ -69,6 +69,7 @@
 #include "ns3/flow-monitor-helper.h"
 #include "ns3/flow-monitor-module.h"
 #include "ns3/netanim-module.h"
+#include "ns3/config-store-module.h"
 
 using namespace ns3;
 
@@ -103,7 +104,9 @@ main (int argc, char *argv[])
   CommandLine cmd (__FILE__);
   cmd.Parse (argc, argv);
 
-  //
+  //Config::SetDefault ("ns3::DropTailQueue<Packet>::MaxSize", StringValue ("100p"));
+  
+  
   // We are interacting with the outside, real, world.  This means we have to 
   // interact in real-time and therefore means we have to use the real-time
   // simulator and take the time to calculate checksums.
@@ -131,12 +134,22 @@ main (int argc, char *argv[])
   // ./waf --run "tap=csma-virtual-machine --ns3::CsmaChannel::DataRate=10000000"
   //
   CsmaHelper csma;
-  // csma.SetChannelAttribute ("Delay", TimeValue (MilliSeconds (100000)));
-  //csma.SetChannelAttribute ("DataRate", StringValue ("10Mbps"));
   //csma.Install()
+  csma.SetChannelAttribute ("DataRate", StringValue ("100Mbps"));
+  csma.SetChannelAttribute ("Delay", TimeValue (MicroSeconds (5)));
   NetDeviceContainer devices = csma.Install (nodes);
-  // csma.SetDeviceAttribute()
+  
+  csma.SetChannelAttribute ("DataRate", StringValue ("100Mbps"));
+  csma.SetChannelAttribute ("Delay", TimeValue (MicroSeconds (5)));
   NetDeviceContainer devices_1 = csma.Install (nodes);
+  
+  // debug 
+  DataRateValue dr_value ;
+  TimeValue delay_value ;   
+  devices.Get(1)->GetChannel()->GetAttribute("DataRate", dr_value); 
+  devices.Get(1)->GetChannel()->GetAttribute("Delay", delay_value); 
+  std::cout<< " DAta rate ::  "<< dr_value.Get();
+  std::cout<< " delay ::  "<< delay_value.Get();
 
   //
   // Use the TapBridgeHelper to connect to the pre-configured tap devices for 
@@ -145,7 +158,7 @@ main (int argc, char *argv[])
   // extended into ns-3.  The install method essentially bridges the specified
   // tap to the specified CSMA device.
   //
-  TapBridgeHelper tapBridge;
+  TapBridgeHelper tapBridge; 
   tapBridge.SetAttribute ("Mode", StringValue ("UseBridge"));
    
   tapBridge.SetAttribute ("DeviceName", StringValue ("tap-left"));
@@ -163,7 +176,8 @@ main (int argc, char *argv[])
   tapBridge.SetAttribute ("DeviceName", StringValue ("tap-right-1"));
   tapBridge.Install (nodes.Get (1), devices_1.Get (1));
 
-  //csma.EnablePcapAll("first"); 
+  csma.EnablePcapAll("first",true);
+  //csma.EnablePcap() 
   //
   // Flow monitor
   // Ptr<FlowMonitor> flowMonitor;
@@ -182,6 +196,16 @@ main (int argc, char *argv[])
   // Create the animation object and configure for specified output
   //AnimationInterface anim ("mp-anim.xml");
   //anim.EnablePacketMetadata (); // Optional
+
+  // Output config store to txt format
+  // Config::SetDefault ("ns3::TcpL4Protocol::SocketType", StringValue ("ns3::TcpNewReno"));
+  Config::SetDefault ("ns3::ConfigStore::Filename", StringValue ("output-attributes.txt"));
+  Config::SetDefault ("ns3::ConfigStore::FileFormat", StringValue ("RawText"));
+  Config::SetDefault ("ns3::ConfigStore::Mode", StringValue ("Save"));
+  ConfigStore outputConfig2;
+  outputConfig2.ConfigureDefaults ();
+  outputConfig2.ConfigureAttributes ();
+   
 
   std::cout << "Stop simulation \n"; 
   Simulator::Stop (Seconds (600.0));

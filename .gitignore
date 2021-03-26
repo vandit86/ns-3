@@ -1,8 +1,10 @@
 # Ignore everything on scratch by default, except the provided examples
-/*
 !.gitignore
-!scratch/
 
+*.json
+*.txt
+*.xml
+*.flowmon
 
 *.diff
 *.orig
