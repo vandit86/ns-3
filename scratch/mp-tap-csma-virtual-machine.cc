@@ -176,7 +176,7 @@ main (int argc, char *argv[])
   tapBridge.SetAttribute ("DeviceName", StringValue ("tap-right-1"));
   tapBridge.Install (nodes.Get (1), devices_1.Get (1));
 
-  csma.EnablePcapAll("first",true);
+  csma.EnablePcapAll("mp-csma",true);
   //csma.EnablePcap() 
   //
   // Flow monitor

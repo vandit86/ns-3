@@ -75,6 +75,11 @@
 #include "ns3/wifi-module.h"
 #include "ns3/tap-bridge-module.h"
 
+
+#include "ns3/ocb-wifi-mac.h"
+#include "ns3/wifi-80211p-helper.h"
+#include "ns3/wave-mac-helper.h"
+
 using namespace ns3;
 
 NS_LOG_COMPONENT_DEFINE ("TapWifiVirtualMachineExample");
@@ -84,6 +89,8 @@ main (int argc, char *argv[])
 {
   CommandLine cmd (__FILE__);
   cmd.Parse (argc, argv);
+
+  std::string phyMode ("OfdmRate6MbpsBW10MHz"); // for wave configuration 
 
   //
   // We are interacting with the outside, real, world.  This means we have to 
@@ -121,11 +128,19 @@ main (int argc, char *argv[])
   YansWifiPhyHelper wifiPhy;
   wifiPhy.SetChannel (wifiChannel.Create ());
 
+  // configure WAVE 
+  NqosWaveMacHelper wifi80211pMac = NqosWaveMacHelper::Default ();
+  Wifi80211pHelper wifi80211p = Wifi80211pHelper::Default ();
+
+  wifi80211p.SetRemoteStationManager ("ns3::ConstantRateWifiManager",
+                                      "DataMode",StringValue (phyMode),
+                                      "ControlMode",StringValue (phyMode));
   //
   // Install the wireless devices onto our ghost nodes.
   //
   NetDeviceContainer devices = wifi.Install (wifiPhy, wifiMac, nodes);
-  NetDeviceContainer devices_1 = wifi.Install (wifiPhy, wifiMac, nodes);
+  NetDeviceContainer devices_1 = wifi80211p.Install (wifiPhy, wifi80211pMac, nodes);
+  // NetDeviceContainer devices_1 = wifi.Install (wifiPhy, wifiMac, nodes);
 
   //
   // We need location information since we are talking about wifi, so add a
@@ -134,7 +149,7 @@ main (int argc, char *argv[])
   MobilityHelper mobility;
   Ptr<ListPositionAllocator> positionAlloc = CreateObject<ListPositionAllocator> ();
   positionAlloc->Add (Vector (0.0, 0.0, 0.0));
-  positionAlloc->Add (Vector (25.0, 0.0, 0.0));
+  positionAlloc->Add (Vector (5.0, 0.0, 0.0));
   mobility.SetPositionAllocator (positionAlloc);
   mobility.SetMobilityModel ("ns3::ConstantPositionMobilityModel");
   mobility.Install (nodes);
@@ -164,7 +179,7 @@ main (int argc, char *argv[])
   tapBridge.Install (nodes.Get (1), devices_1.Get (1));
 
   // ENABLE PCAP 
-  wifiPhy.EnablePcapAll("mp-wifi",true);
+  wifiPhy.EnablePcapAll("mp-wifi-wave",true);
   //
   // Run the simulation for ten minutes to give the user time to play around
   //
