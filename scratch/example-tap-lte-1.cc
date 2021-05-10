@@ -36,6 +36,7 @@
 #include "ns3/ipv4-static-routing-helper.h"
 #include "ns3/flow-monitor-helper.h"
 #include "ns3/flow-monitor-module.h"
+#include "ns3/netanim-module.h"
 
 
 using namespace ns3;
@@ -67,7 +68,7 @@ void ThroughputMonitor (FlowMonitorHelper* fmhelper, Ptr<FlowMonitor> flowMon)
 
  // Rescheduling the next call to this function to print throughput
  Simulator::Schedule(Seconds(3),&ThroughputMonitor, fmhelper, flowMon);
-
+  
 }
 
 
@@ -76,6 +77,24 @@ main (int argc, char *argv[])
 {
 
   LogComponentEnable("EpcFirstExample",LOG_LEVEL_INFO);
+
+  LogLevel logLevel = (LogLevel) ( LOG_LEVEL_ALL);
+  // LogLevel logLevel = (LogLevel) (LOG_PREFIX_ALL | LOG_LEVEL_ALL);
+  //LogComponentEnable ("LteHelper", logLevel);
+  //LogComponentEnable ("EpcHelper", logLevel);
+  // LogComponentEnable ("EpcEnbApplication", logLevel);
+  // LogComponentEnable ("LteEnbRrc", logLevel);
+  // LogComponentEnable ("LteEnbNetDevice", logLevel);
+  
+  LogComponentEnable ("EpcPgwApplication", logLevel);
+  
+  //
+  
+  // LogComponentEnable ("LteUeRrc", logLevel);
+  // LogComponentEnable ("LteUeNetDevice", logLevel);
+
+  // LogComponentEnable ("EpcX2", logLevel);
+  // LogComponentEnable ("EpcSgwPgwApplication", logLevel);
 
   uint16_t numberOfNodes = 1;
   double simTime = 10;
@@ -93,18 +112,19 @@ main (int argc, char *argv[])
 
   // Default LTE configuration
   Config::SetDefault ("ns3::LteSpectrumPhy::CtrlErrorModelEnabled", BooleanValue (false));
-  Config::SetDefault ("ns3::LteSpectrumPhy::DataErrorModelEnabled", BooleanValue (true));
+  Config::SetDefault ("ns3::LteSpectrumPhy::DataErrorModelEnabled", BooleanValue (false));
   Config::SetDefault ("ns3::RrFfMacScheduler::HarqEnabled", BooleanValue (false));
   Config::SetDefault ("ns3::LteHelper::PathlossModel", StringValue ("ns3::FriisSpectrumPropagationLossModel"));
   Config::SetDefault ("ns3::LteEnbNetDevice::UlBandwidth", UintegerValue(100)); //20MHz bandwidth
   Config::SetDefault ("ns3::LteEnbNetDevice::DlBandwidth", UintegerValue(100)); //20MHz bandwidth
   Config::SetDefault ("ns3::LteAmc::AmcModel", EnumValue (LteAmc::PiroEW2010));
+  // Config::SetDefault ("ns3::RealtimeSimulatorImpl::SynchronizationMode"=StringValue("HardLimit")); 
   //Config::SetDefault ("ns3::LteAmc::Ber", DoubleValue (0.00005));
 
   SeedManager::SetSeed((uint32_t)(time(NULL)));
 
   // Uncomment to enable PCAP tracing
-//  Config::SetDefault ("ns3::PointToPointEpcHelper::S1uLinkEnablePcap", BooleanValue (true));
+Config::SetDefault ("ns3::PointToPointEpcHelper::S1uLinkEnablePcap", BooleanValue (true));
 
   if (useCa)
    {
@@ -124,15 +144,19 @@ main (int argc, char *argv[])
   GlobalValue::Bind ("SimulatorImplementationType", StringValue ("ns3::RealtimeSimulatorImpl"));
   GlobalValue::Bind ("ChecksumEnabled", BooleanValue (true));
 
-
   Ptr<LteHelper> lteHelper = CreateObject<LteHelper> ();
   Ptr<PointToPointEpcHelper>  epcHelper = CreateObject<PointToPointEpcHelper> ();
   // epcHelper
   lteHelper->SetEpcHelper (epcHelper);
 
-  ConfigStore inputConfig;
-  inputConfig.ConfigureDefaults();
-
+  // config output
+  Config::SetDefault ("ns3::ConfigStore::Filename", StringValue ("output-attributes.txt"));
+  Config::SetDefault ("ns3::ConfigStore::FileFormat", StringValue ("RawText"));
+  Config::SetDefault ("ns3::ConfigStore::Mode", StringValue ("Save"));
+  ConfigStore outputConfig2;
+  outputConfig2.ConfigureDefaults ();
+  outputConfig2.ConfigureAttributes ();
+  
   // parse again so you can override default values from the command line
   cmd.Parse(argc, argv);
 
@@ -142,17 +166,27 @@ main (int argc, char *argv[])
   enbNodes.Create(numberOfNodes);
   ueNodes.Create(numberOfNodes);
 
+  
+
+  // Create ghost nodes that will host the TapBridge and connect to the base system
+  NodeContainer ghost_nodes;
+  ghost_nodes.Create (2);
+
+  // Recover the pgw to install the csma device
+  Ptr<Node> pgw = epcHelper->GetPgwNode ();
+
   // Install Mobility Model
   Ptr<ListPositionAllocator> positionAlloc = CreateObject<ListPositionAllocator> ();
   for (uint16_t i = 0; i < numberOfNodes; i++)
     {
-      positionAlloc->Add (Vector(distance * i, 0, 0));
+      positionAlloc->Add (Vector (distance * i, 0, 0));
     }
+
   MobilityHelper mobility;
-  mobility.SetMobilityModel("ns3::ConstantPositionMobilityModel");
-  mobility.SetPositionAllocator(positionAlloc);
-  mobility.Install(enbNodes);
-  mobility.Install(ueNodes);
+  mobility.SetMobilityModel ("ns3::ConstantPositionMobilityModel");
+  mobility.SetPositionAllocator (positionAlloc);
+  mobility.Install (enbNodes);
+  mobility.Install (ueNodes);
 
   // Install LTE Devices to the nodes
   NetDeviceContainer enbLteDevs = lteHelper->InstallEnbDevice (enbNodes);
@@ -163,6 +197,7 @@ main (int argc, char *argv[])
   internet.Install (ueNodes);
   Ipv4InterfaceContainer ueIpIface;
   ueIpIface = epcHelper->AssignUeIpv4Address (NetDeviceContainer (ueLteDevs));
+
   // Assign IP address to UEs, and install applications
   Ipv4StaticRoutingHelper ipv4RoutingHelper;
   for (uint32_t u = 0; u < ueNodes.GetN (); ++u)
@@ -175,17 +210,10 @@ main (int argc, char *argv[])
 
   // Attach one UE per eNodeB
   for (uint16_t i = 0; i < numberOfNodes; i++)
-      {
-        lteHelper->Attach (ueLteDevs.Get(i), enbLteDevs.Get(i));
-        // side effect: the default EPS bearer will be activated
-      }
-
-  // Create ghost nodes that will host the TapBridge and connect to the base system
-  NodeContainer ghost_nodes;
-  ghost_nodes.Create(2);
-
-  // Recover the ogw to install the csma device
-  Ptr<Node> pgw = epcHelper->GetPgwNode ();
+    {
+      lteHelper->Attach (ueLteDevs.Get (i), enbLteDevs.Get (i));
+      // side effect: the default EPS bearer will be activated
+    }
 
   // Setup the left ghost node and hook it to the first UE
   CsmaHelper csma_left;
@@ -201,6 +229,7 @@ main (int argc, char *argv[])
   NodeContainer csma_right_nodes(ghost_nodes.Get(1), pgw);
   NetDeviceContainer csma_right_devices = csma_right.Install (csma_right_nodes);
 
+
   // Now we set up the tap bridges in the ghost nodes to connect to an external tap defined in the OS (and hooked to a namespace)
   TapBridgeHelper tapBridge_left;
   tapBridge_left.SetAttribute ("Mode", StringValue ("UseLocal"));
@@ -209,28 +238,27 @@ main (int argc, char *argv[])
 
   TapBridgeHelper tapBridge_right;
   tapBridge_right.SetAttribute ("Mode", StringValue ("UseLocal"));
-  tapBridge_right.SetAttribute ("DeviceName", StringValue ("tap-right-1"));
+  tapBridge_right.SetAttribute ("DeviceName", StringValue ("tap-right"));
   tapBridge_right.Install (ghost_nodes.Get (1), csma_right_devices.Get (0));
 
   // Configuring the UE and the csma device in the pgw as the default gateways for the external networks
   Ipv4AddressHelper ipv4h;
-  ipv4h.SetBase ("10.1.0.0", "255.255.255.0", "0.0.0.2");
+  ipv4h.SetBase ("11.0.0.0", "255.0.0.0", "0.0.0.1");
   Ipv4InterfaceContainer UeIpIfaces = ipv4h.Assign (NetDeviceContainer(csma_left_devices.Get (1)));
   
-  ipv4h.SetBase ("10.2.0.0", "255.255.255.0", "0.0.0.1");
+  ipv4h.SetBase ("13.0.0.0", "255.0.0.0", "0.0.0.1");
   Ipv4InterfaceContainer rNodeIpIfaces = ipv4h.Assign (NetDeviceContainer(csma_right_devices.Get (1)));
-
-  // Now configure the IP routing stack in the UE and the remote node to point towards the external IP networks that are outside the ns3 simulation
-  // TODO: We are hardcoding here the IP addresses of the external networks. Should be passed as parameter
-  // 11.0.0.0/8 --> Namespace connected through tap-left
-  // 13.0.0.0/8 --> Namespace connected through tap-right
 
   // Adding the network behind the UE to the pgw --> hardcoding the IP address of the UE connected to the external network
   Ptr<Ipv4StaticRouting> pgwStaticRouting = ipv4RoutingHelper.GetStaticRouting (pgw->GetObject<Ipv4> ());
-  pgwStaticRouting->AddNetworkRouteTo (Ipv4Address ("10.1.0.0"), Ipv4Mask ("255.255.255.0"), Ipv4Address ("7.0.0.2"), 1);
+  pgwStaticRouting->AddNetworkRouteTo (Ipv4Address ("11.0.0.0"), Ipv4Mask ("255.0.0.0"), Ipv4Address ("7.0.0.2"), 1);
+  
+  // pgwStaticRouting->AddHostRouteTo(Ipv4Address("11.0.0.2"), 1); 
+  // pgwStaticRouting->SetDefaultRoute(Ipv4Address ("7.0.0.2"), 1); 
 
   // Ptr<Ipv4StaticRouting> eNodeBStaticRouting = ipv4RoutingHelper.GetStaticRouting (enbNodes.Get(0)->GetObject<Ipv4> ());
   // eNodeBStaticRouting->AddNetworkRouteTo (Ipv4Address ("10.0.0.0"), Ipv4Mask ("255.255.255.0"), Ipv4Address ("10.0.0.2"), 1);
+
   // // Configuring the UE and the csma device in the pgw as the default gateways for the external networks
   // Ipv4AddressHelper ipv4h;
   // ipv4h.SetBase ("11.0.0.0", "255.0.0.0");
@@ -268,8 +296,11 @@ main (int argc, char *argv[])
 
   // LTE statistics
   lteHelper->EnableTraces ();
- csma_left.EnablePcap("lena-emu-csma_left", csma_left_devices.Get(0), true);
- csma_right.EnablePcap("lena-emu-csma_right", csma_right_devices.Get(0), true);
+ //csma_left.EnablePcap("lena-emu-csma_left", csma_left_devices.Get(0), true);
+ //csma_right.EnablePcap("lena-emu-csma_right", csma_right_devices.Get(0), true);
+  
+  csma_left.EnablePcapAll("csma_lte", true); 
+  // csma_right.EnablePcapAll("csma_right", true); 
 
   // Flow monitor
   Ptr<FlowMonitor> flowMonitor;
@@ -277,16 +308,35 @@ main (int argc, char *argv[])
   flowMonitor = flowHelper.InstallAll();
 
   // scheduling throughput to be printed every 3 seconds
-  ThroughputMonitor(&flowHelper, flowMonitor);
+  ThroughputMonitor (&flowHelper, flowMonitor);
 
+  // print routing table of PGW
+  std::cout << "routing table of PGW" << std::endl;
+  Ptr<ns3::OutputStreamWrapper> strwrp = Create<OutputStreamWrapper> (&std::cout);
+  pgwStaticRouting->PrintRoutingTable (strwrp);
 
-  Simulator::Stop(Seconds(simTime));
-  Simulator::Run();
+  std::cout << "routing table of Ue" << std::endl;
+  Ptr<Ipv4StaticRouting> ueStaticRouting =
+      ipv4RoutingHelper.GetStaticRouting (ueNodes.Get (0)->GetObject<Ipv4> ());
+  ueStaticRouting->PrintRoutingTable (strwrp);
+
+  Simulator::Stop (Seconds (simTime));
+
+  // animation
+  AnimationInterface anim ("mp-lte-animation.xml"); // Mandatory
+  anim.EnablePacketMetadata (); // Optional
+  anim.EnableIpv4RouteTracking ("routingtable-wireless.xml", Seconds (0), Seconds (5),
+                                Seconds (0.25)); //Optional
+  anim.EnableIpv4L3ProtocolCounters (Seconds (1), Seconds (simTime));
+  Simulator::Run ();
 
   /*GtkConfigStore config;
   config.ConfigureAttributes();*/
 
   Simulator::Destroy();
+
+  flowMonitor->SerializeToXmlFile("mp-flow-monitor.xml", true, true); 
+
   return 0;
 
 }
