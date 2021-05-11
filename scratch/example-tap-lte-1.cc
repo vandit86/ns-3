@@ -71,28 +71,46 @@ void ThroughputMonitor (FlowMonitorHelper* fmhelper, Ptr<FlowMonitor> flowMon)
   
 }
 
+/**
+   * Set the address of a previously added UE
+   * \brief  we need to add address of lxc container connected through wired (CSMA) connection to the UE because in LENA, in 
+   * the downlink, the PGW uses the destination IP address to identify a single UE and the eNB to which it is attached to. 
+   * If you specify a destination IP address that does not belong to any UE, 
+   * the packet will just be dropped by the PGW, because it would not know to which eNB it should be routed 
+   * through
+   * \param pgw PGW node 
+   * \param ueLteNetDev lteNetDevice installed on the UE (nedded to get IMSI)
+   * \param ueAddr the IPv4 address of the LXC container connected to ue Net device
+*/
+void
+addBackAddress (Ptr<Node> pgw, Ptr<NetDevice> ueLteNetDev, Ipv4Address addr)
+{
+  // First we need to get IMSI of ueLteNetDevice conencted through csma link to container
+  Ptr<LteUeNetDevice> uedev = ueLteNetDev->GetObject<LteUeNetDevice> ();
+  uint64_t imsi = uedev->GetImsi ();
+
+  // get PGW application from pgw node
+  Ptr<EpcPgwApplication> pgwApp = pgw->GetApplication (0)->GetObject<EpcPgwApplication> ();
+
+  // add container address to allow traffic through PGW node
+  pgwApp->SetUeAddress (imsi, addr);
+}
 
 int
 main (int argc, char *argv[])
 {
-
   LogComponentEnable("EpcFirstExample",LOG_LEVEL_INFO);
-
   LogLevel logLevel = (LogLevel) ( LOG_LEVEL_ALL);
+  LogComponentEnable ("EpcPgwApplication", logLevel);
+  
   // LogLevel logLevel = (LogLevel) (LOG_PREFIX_ALL | LOG_LEVEL_ALL);
-  //LogComponentEnable ("LteHelper", logLevel);
-  //LogComponentEnable ("EpcHelper", logLevel);
+  // LogComponentEnable ("LteHelper", logLevel);
+  // LogComponentEnable ("EpcHelper", logLevel);
   // LogComponentEnable ("EpcEnbApplication", logLevel);
   // LogComponentEnable ("LteEnbRrc", logLevel);
   // LogComponentEnable ("LteEnbNetDevice", logLevel);
-  
-  LogComponentEnable ("EpcPgwApplication", logLevel);
-  
-  //
-  
   // LogComponentEnable ("LteUeRrc", logLevel);
   // LogComponentEnable ("LteUeNetDevice", logLevel);
-
   // LogComponentEnable ("EpcX2", logLevel);
   // LogComponentEnable ("EpcSgwPgwApplication", logLevel);
 
@@ -114,27 +132,29 @@ main (int argc, char *argv[])
   Config::SetDefault ("ns3::LteSpectrumPhy::CtrlErrorModelEnabled", BooleanValue (false));
   Config::SetDefault ("ns3::LteSpectrumPhy::DataErrorModelEnabled", BooleanValue (false));
   Config::SetDefault ("ns3::RrFfMacScheduler::HarqEnabled", BooleanValue (false));
-  Config::SetDefault ("ns3::LteHelper::PathlossModel", StringValue ("ns3::FriisSpectrumPropagationLossModel"));
-  Config::SetDefault ("ns3::LteEnbNetDevice::UlBandwidth", UintegerValue(100)); //20MHz bandwidth
-  Config::SetDefault ("ns3::LteEnbNetDevice::DlBandwidth", UintegerValue(100)); //20MHz bandwidth
+  Config::SetDefault ("ns3::LteHelper::PathlossModel",
+                      StringValue ("ns3::FriisSpectrumPropagationLossModel"));
+  Config::SetDefault ("ns3::LteEnbNetDevice::UlBandwidth", UintegerValue (100)); //20MHz bandwidth
+  Config::SetDefault ("ns3::LteEnbNetDevice::DlBandwidth", UintegerValue (100)); //20MHz bandwidth
   Config::SetDefault ("ns3::LteAmc::AmcModel", EnumValue (LteAmc::PiroEW2010));
-  // Config::SetDefault ("ns3::RealtimeSimulatorImpl::SynchronizationMode"=StringValue("HardLimit")); 
+  // Config::SetDefault ("ns3::RealtimeSimulatorImpl::SynchronizationMode"=StringValue("HardLimit"));
   //Config::SetDefault ("ns3::LteAmc::Ber", DoubleValue (0.00005));
 
-  SeedManager::SetSeed((uint32_t)(time(NULL)));
+  SeedManager::SetSeed ((uint32_t) (time (NULL)));
 
   // Uncomment to enable PCAP tracing
-Config::SetDefault ("ns3::PointToPointEpcHelper::S1uLinkEnablePcap", BooleanValue (true));
+  Config::SetDefault ("ns3::PointToPointEpcHelper::S1uLinkEnablePcap", BooleanValue (true));
 
   if (useCa)
-   {
-     Config::SetDefault ("ns3::LteHelper::UseCa", BooleanValue (useCa));
-     Config::SetDefault ("ns3::LteHelper::NumberOfComponentCarriers", UintegerValue (2));
-     Config::SetDefault ("ns3::LteHelper::EnbComponentCarrierManager", StringValue ("ns3::RrComponentCarrierManager"));
-     Config::SetDefault ("ns3::ComponentCarrier::UlBandwidth", UintegerValue (100));
-     Config::SetDefault ("ns3::ComponentCarrier::DlBandwidth", UintegerValue (100));
-     Config::SetDefault ("ns3::ComponentCarrier::PrimaryCarrier", BooleanValue (true));
-   }
+    {
+      Config::SetDefault ("ns3::LteHelper::UseCa", BooleanValue (useCa));
+      Config::SetDefault ("ns3::LteHelper::NumberOfComponentCarriers", UintegerValue (2));
+      Config::SetDefault ("ns3::LteHelper::EnbComponentCarrierManager",
+                          StringValue ("ns3::RrComponentCarrierManager"));
+      Config::SetDefault ("ns3::ComponentCarrier::UlBandwidth", UintegerValue (100));
+      Config::SetDefault ("ns3::ComponentCarrier::DlBandwidth", UintegerValue (100));
+      Config::SetDefault ("ns3::ComponentCarrier::PrimaryCarrier", BooleanValue (true));
+    }
 
   //
   // We are interacting with the outside, real, world.  This means we have to
@@ -145,7 +165,7 @@ Config::SetDefault ("ns3::PointToPointEpcHelper::S1uLinkEnablePcap", BooleanValu
   GlobalValue::Bind ("ChecksumEnabled", BooleanValue (true));
 
   Ptr<LteHelper> lteHelper = CreateObject<LteHelper> ();
-  Ptr<PointToPointEpcHelper>  epcHelper = CreateObject<PointToPointEpcHelper> ();
+  Ptr<PointToPointEpcHelper> epcHelper = CreateObject<PointToPointEpcHelper> ();
   // epcHelper
   lteHelper->SetEpcHelper (epcHelper);
 
@@ -156,23 +176,21 @@ Config::SetDefault ("ns3::PointToPointEpcHelper::S1uLinkEnablePcap", BooleanValu
   ConfigStore outputConfig2;
   outputConfig2.ConfigureDefaults ();
   outputConfig2.ConfigureAttributes ();
-  
+
   // parse again so you can override default values from the command line
-  cmd.Parse(argc, argv);
+  cmd.Parse (argc, argv);
 
   // Defining UE and eNB nodes
   NodeContainer ueNodes;
   NodeContainer enbNodes;
-  enbNodes.Create(numberOfNodes);
-  ueNodes.Create(numberOfNodes);
-
-  
+  enbNodes.Create (numberOfNodes);
+  ueNodes.Create (numberOfNodes);
 
   // Create ghost nodes that will host the TapBridge and connect to the base system
   NodeContainer ghost_nodes;
   ghost_nodes.Create (2);
 
-  // Recover the pgw to install the csma device
+  // Get the pgw node to install the csma device
   Ptr<Node> pgw = epcHelper->GetPgwNode ();
 
   // Install Mobility Model
@@ -198,12 +216,11 @@ Config::SetDefault ("ns3::PointToPointEpcHelper::S1uLinkEnablePcap", BooleanValu
   Ipv4InterfaceContainer ueIpIface;
   ueIpIface = epcHelper->AssignUeIpv4Address (NetDeviceContainer (ueLteDevs));
 
-  // Assign IP address to UEs, and install applications
+  // // Set the default gateway for the UE using a static routing
   Ipv4StaticRoutingHelper ipv4RoutingHelper;
   for (uint32_t u = 0; u < ueNodes.GetN (); ++u)
     {
       Ptr<Node> ueNode = ueNodes.Get (u);
-      // Set the default gateway for the UE
       Ptr<Ipv4StaticRouting> ueStaticRouting = ipv4RoutingHelper.GetStaticRouting (ueNode->GetObject<Ipv4> ());
       ueStaticRouting->SetDefaultRoute (epcHelper->GetUeDefaultGatewayAddress (), 1);
     }
@@ -229,7 +246,6 @@ Config::SetDefault ("ns3::PointToPointEpcHelper::S1uLinkEnablePcap", BooleanValu
   NodeContainer csma_right_nodes(ghost_nodes.Get(1), pgw);
   NetDeviceContainer csma_right_devices = csma_right.Install (csma_right_nodes);
 
-
   // Now we set up the tap bridges in the ghost nodes to connect to an external tap defined in the OS (and hooked to a namespace)
   TapBridgeHelper tapBridge_left;
   tapBridge_left.SetAttribute ("Mode", StringValue ("UseLocal"));
@@ -252,30 +268,10 @@ Config::SetDefault ("ns3::PointToPointEpcHelper::S1uLinkEnablePcap", BooleanValu
   // Adding the network behind the UE to the pgw --> hardcoding the IP address of the UE connected to the external network
   Ptr<Ipv4StaticRouting> pgwStaticRouting = ipv4RoutingHelper.GetStaticRouting (pgw->GetObject<Ipv4> ());
   pgwStaticRouting->AddNetworkRouteTo (Ipv4Address ("11.0.0.0"), Ipv4Mask ("255.0.0.0"), Ipv4Address ("7.0.0.2"), 1);
+
+  // ADD lxc mp-left container address to allow "ping through EPC-PGW node"
+  addBackAddress (pgw, ueLteDevs.Get(0), Ipv4Address ("11.0.0.2")); 
   
-  // pgwStaticRouting->AddHostRouteTo(Ipv4Address("11.0.0.2"), 1); 
-  // pgwStaticRouting->SetDefaultRoute(Ipv4Address ("7.0.0.2"), 1); 
-
-  // Ptr<Ipv4StaticRouting> eNodeBStaticRouting = ipv4RoutingHelper.GetStaticRouting (enbNodes.Get(0)->GetObject<Ipv4> ());
-  // eNodeBStaticRouting->AddNetworkRouteTo (Ipv4Address ("10.0.0.0"), Ipv4Mask ("255.255.255.0"), Ipv4Address ("10.0.0.2"), 1);
-
-  // // Configuring the UE and the csma device in the pgw as the default gateways for the external networks
-  // Ipv4AddressHelper ipv4h;
-  // ipv4h.SetBase ("11.0.0.0", "255.0.0.0");
-  // Ipv4InterfaceContainer UeIpIfaces = ipv4h.Assign (NetDeviceContainer(csma_left_devices.Get (1)));
-  // ipv4h.SetBase ("13.0.0.0", "255.0.0.0");
-  // Ipv4InterfaceContainer rNodeIpIfaces = ipv4h.Assign (NetDeviceContainer(csma_right_devices.Get (1)));
-
-  // // Now configure the IP routing stack in the UE and the remote node to point towards the external IP networks that are outside the ns3 simulation
-  // // TODO: We are hardcoding here the IP addresses of the external networks. Should be passed as parameter
-  // // 11.0.0.0/8 --> Namespace connected through tap-left
-  // // 13.0.0.0/8 --> Namespace connected through tap-right
-
-  // // Adding the network behind the UE to the pgw --> hardcoding the IP address of the UE connected to the external network
-  // Ptr<Ipv4StaticRouting> pgwStaticRouting = ipv4RoutingHelper.GetStaticRouting (pgw->GetObject<Ipv4> ());
-  // pgwStaticRouting->AddNetworkRouteTo (Ipv4Address ("11.0.0.0"), Ipv4Mask ("255.0.0.0"), Ipv4Address ("7.0.0.2"), 1);
-
-
   // Debug: Testing that proper IP addresses are configured
   Ptr<Node> ueNodeZero = ueNodes.Get (0);
   Ipv4Address gateway = epcHelper->GetUeDefaultGatewayAddress ();
@@ -308,17 +304,17 @@ Config::SetDefault ("ns3::PointToPointEpcHelper::S1uLinkEnablePcap", BooleanValu
   flowMonitor = flowHelper.InstallAll();
 
   // scheduling throughput to be printed every 3 seconds
-  ThroughputMonitor (&flowHelper, flowMonitor);
+  // ThroughputMonitor (&flowHelper, flowMonitor);
 
   // print routing table of PGW
-  std::cout << "routing table of PGW" << std::endl;
-  Ptr<ns3::OutputStreamWrapper> strwrp = Create<OutputStreamWrapper> (&std::cout);
-  pgwStaticRouting->PrintRoutingTable (strwrp);
+  // std::cout << "routing table of PGW" << std::endl;
+  // Ptr<ns3::OutputStreamWrapper> strwrp = Create<OutputStreamWrapper> (&std::cout);
+  // pgwStaticRouting->PrintRoutingTable (strwrp);
 
-  std::cout << "routing table of Ue" << std::endl;
-  Ptr<Ipv4StaticRouting> ueStaticRouting =
-      ipv4RoutingHelper.GetStaticRouting (ueNodes.Get (0)->GetObject<Ipv4> ());
-  ueStaticRouting->PrintRoutingTable (strwrp);
+  // std::cout << "routing table of Ue" << std::endl;
+  // Ptr<Ipv4StaticRouting> ueStaticRouting =
+  //     ipv4RoutingHelper.GetStaticRouting (ueNodes.Get (0)->GetObject<Ipv4> ());
+  // ueStaticRouting->PrintRoutingTable (strwrp);
 
   Simulator::Stop (Seconds (simTime));
 
