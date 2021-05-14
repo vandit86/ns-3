@@ -147,7 +147,7 @@ main (int argc, char *argv[])
   SeedManager::SetSeed ((uint32_t) (time (NULL)));
 
   // Uncomment to enable PCAP tracing
-  Config::SetDefault ("ns3::PointToPointEpcHelper::S1uLinkEnablePcap", BooleanValue (true));
+  // Config::SetDefault ("ns3::PointToPointEpcHelper::S1uLinkEnablePcap", BooleanValue (true));
 
   if (useCa)
     {
@@ -167,6 +167,10 @@ main (int argc, char *argv[])
   //
   GlobalValue::Bind ("SimulatorImplementationType", StringValue ("ns3::RealtimeSimulatorImpl"));
   GlobalValue::Bind ("ChecksumEnabled", BooleanValue (true));
+
+  // ********************************************************
+  // Configuring LTE
+  // ********************************************************
 
   Ptr<LteHelper> lteHelper = CreateObject<LteHelper> ();
   Ptr<PointToPointEpcHelper> epcHelper = CreateObject<PointToPointEpcHelper> ();
@@ -197,7 +201,8 @@ main (int argc, char *argv[])
   // Get the pgw node to install the csma device
   Ptr<Node> pgw = epcHelper->GetPgwNode ();
 
-  // Install Mobility Model
+  // Install Mobility Model **************************
+  
   Ptr<ListPositionAllocator> positionAlloc = CreateObject<ListPositionAllocator> ();
   for (uint16_t i = 0; i < numberOfNodes; i++)
     {
@@ -209,6 +214,8 @@ main (int argc, char *argv[])
   mobility.SetPositionAllocator (positionAlloc);
   mobility.Install (enbNodes);
   mobility.Install (ueNodes);
+
+  // ****************************************************
 
   // Install LTE Devices to the nodes
   NetDeviceContainer enbLteDevs = lteHelper->InstallEnbDevice (enbNodes);
@@ -295,11 +302,11 @@ main (int argc, char *argv[])
 
   // set possition for the ghost-node 
   positionAlloc->Add (Vector (0.0, 0.0, 0.0));
-  positionAlloc->Add (Vector (5.0, 0.0, 0.0));
+  positionAlloc->Add (Vector (distance, 0, 0));
   mobility.SetPositionAllocator (positionAlloc);
   mobility.SetMobilityModel ("ns3::ConstantPositionMobilityModel");
-  mobility.Install (ghost_nodes.Get(0));
   mobility.Install (ghost_nodes.Get(1));
+  mobility.Install (ghost_nodes.Get(0));
 
   // ********************************************************
   // Configuring TAP bridge
@@ -346,14 +353,16 @@ main (int argc, char *argv[])
   std::cout << "PGW IP@ on ifc 3: " << addr3_pgw << std::endl;
 
   // LTE statistics
-  lteHelper->EnableTraces ();
- //csma_left.EnablePcap("lena-emu-csma_left", csma_left_devices.Get(0), true);
- //csma_right.EnablePcap("lena-emu-csma_right", csma_right_devices.Get(0), true);
-  
-  csma_left.EnablePcapAll("csma_lte", true); 
+  // lteHelper->EnableTraces ();
+
+  // LTE connection to ghost nodes
+  csma_left.EnablePcap ("lena-csma-left", csma_left_devices.Get (0), true);
+  csma_right.EnablePcap ("lena-csma-right", csma_right_devices.Get (0), true);
+
+  // csma_left.EnablePcapAll("csma_lte", true);
   // csma_right.EnablePcapAll("csma_right", true);
 
-  // wifi ENABLE PCAP 
+  // wifi ENABLE PCAP
   wifiPhy.EnablePcapAll("mp-wifi-lte",true);
    
   // Flow monitor

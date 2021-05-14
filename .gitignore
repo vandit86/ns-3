@@ -24,6 +24,8 @@
 *.plt
 *.routes
 *.tr
+*.gif
+*.png
 [D|U]l[A-Z][a-z]*Stats.txt
 
 \#*#
