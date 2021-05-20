@@ -272,13 +272,21 @@ main (int argc, char *argv[])
       ipv4RoutingHelper.GetStaticRouting (pgw->GetObject<Ipv4> ());
   pgwStaticRouting->AddNetworkRouteTo (Ipv4Address ("11.0.0.0"), Ipv4Mask ("255.0.0.0"),
                                        Ipv4Address ("7.0.0.2"), 1);
+  pgwStaticRouting->AddNetworkRouteTo (Ipv4Address ("15.0.0.0"), Ipv4Mask ("255.0.0.0"),
+                                       Ipv4Address ("7.0.0.2"), 1);
 
   // ADD lxc mp-left container address to allow "ping through EPC-PGW node"
   addBackAddress (pgw, ueLteDevs.Get (0), Ipv4Address ("11.0.0.2"));
 
   // ********************************************************
-  // Configuring WiFI
+  // Configuring WiFI path
   // ********************************************************
+
+  NodeContainer wifiAP;
+  wifiAP.Create(1);     // create AP node 
+
+  // std::string phyMode ("DsssRate1Mbps");
+  // double rss = -80;  // -dBm
 
   // We're going to use 802.11 A so set up a wifi helper to reflect that.
   WifiHelper wifi;
@@ -297,7 +305,7 @@ main (int argc, char *argv[])
 
   // Install the wireless devices onto our ghost nodes.
   // NodeContainer wifiNodes (ueNodes.Get(0), ghost_nodes.Get(1)); 
-  NodeContainer wifiNodes (ghost_nodes.Get(0), ghost_nodes.Get(1)); 
+  NodeContainer wifiNodes (ghost_nodes.Get(0), wifiAP.Get(0)); 
   NetDeviceContainer wifiDevices = wifi.Install (wifiPhy, wifiMac, wifiNodes);
 
   // set possition for the ghost-node 
@@ -305,8 +313,34 @@ main (int argc, char *argv[])
   positionAlloc->Add (Vector (distance, 0, 0));
   mobility.SetPositionAllocator (positionAlloc);
   mobility.SetMobilityModel ("ns3::ConstantPositionMobilityModel");
-  mobility.Install (ghost_nodes.Get(1));
+  mobility.Install (wifiAP.Get(0));
   mobility.Install (ghost_nodes.Get(0));
+
+  // install ip stack on wifi AP 
+  // InternetStackHelper internet;
+  internet.Install (wifiAP);
+
+  // Assign adress to AP wifi inface
+  NS_LOG_INFO ("Assign IP Addresses to AP.");
+  ipv4h.SetBase ("15.0.0.0", "255.0.0.0", "0.0.0.1");
+  Ipv4InterfaceContainer wifiAPinface = ipv4h.Assign (wifiDevices.Get(1));
+
+  // Copnnect AP with right host through csma 10Gb/s and 10 ms delay
+  CsmaHelper csmaHelper;
+  csmaHelper.SetChannelAttribute ("DataRate", DataRateValue (DataRate ("10Gb/s")));
+  csmaHelper.SetChannelAttribute ("Delay", TimeValue (MilliSeconds (10)));
+  NodeContainer csma_AP_right_nodes (wifiAP.Get (0), ghost_nodes.Get (1));
+  NetDeviceContainer csma_AP_right_devices = csmaHelper.Install (csma_AP_right_nodes);
+
+  // Assign adress to AP csma inface
+  ipv4h.SetBase ("14.0.0.0", "255.0.0.0", "0.0.0.1");
+  Ipv4InterfaceContainer csmaAPinface = ipv4h.Assign (csma_AP_right_devices.Get (0));
+  
+
+  // add route to left lxc
+  // ip route add 14.0.0.0/8 via 15.0.0.1 dev eth1
+  // add route to right lxc
+  // ip route add 15.0.0.0/8 via 14.0.0.1 dev eth1
 
   // ********************************************************
   // Configuring TAP bridge
@@ -326,11 +360,23 @@ main (int argc, char *argv[])
   TapBridgeHelper tapBridge1;
   tapBridge1.SetAttribute ("Mode", StringValue ("UseLocal"));
   tapBridge1.SetAttribute ("DeviceName", StringValue ("tap-left-1"));
-  tapBridge1.Install (wifiNodes.Get(0), wifiDevices.Get (0));
+  tapBridge1.Install (ghost_nodes.Get (0), wifiDevices.Get (0));
   tapBridge1.SetAttribute ("DeviceName", StringValue ("tap-right-1"));
-  tapBridge1.Install (wifiNodes.Get (1), wifiDevices.Get (1));
+  tapBridge1.Install (ghost_nodes.Get (1), csma_AP_right_devices.Get (1));
 
+  // ********************************************************
+  // turn off AP csma interface after N sec
+  // turn ON AP csma interface after M sec
+  // ********************************************************
+ 
+  Ptr<Ipv4> ipv4_AP = wifiAP.Get(0)->GetObject<Ipv4> ();
+  // std::cout << "index " << csmaAPinface.Get(0).second << std::endl; 
+  uint32_t ipv4ifIndex = 2;   // index of csma interface of AP 
+  
+  //ipv4_AP->SetDown(2); 
 
+  Simulator::Schedule (Seconds (15), &Ipv4::SetDown, ipv4_AP, ipv4ifIndex);
+  Simulator::Schedule (Seconds (25), &Ipv4::SetUp, ipv4_AP, ipv4ifIndex);
 
   // ********************************************************
   // Debug: Testing that proper IP addresses are configured
@@ -356,14 +402,14 @@ main (int argc, char *argv[])
   // lteHelper->EnableTraces ();
 
   // LTE connection to ghost nodes
-  csma_left.EnablePcap ("lena-csma-left", csma_left_devices.Get (0), true);
-  csma_right.EnablePcap ("lena-csma-right", csma_right_devices.Get (0), true);
+  // csma_right.EnablePcap ("lena-csma-right", csma_right_devices.Get (0), true);
+  // csma_right.EnablePcap ("lena-csma-right", csma_AP_right_devices.Get (1), true);
 
   // csma_left.EnablePcapAll("csma_lte", true);
   // csma_right.EnablePcapAll("csma_right", true);
 
   // wifi ENABLE PCAP
-  wifiPhy.EnablePcapAll("mp-wifi-lte",true);
+  // wifiPhy.EnablePcapAll("mp-wifi-lte",true);
    
   // Flow monitor
   Ptr<FlowMonitor> flowMonitor;
@@ -378,19 +424,16 @@ main (int argc, char *argv[])
   Ptr<ns3::OutputStreamWrapper> strwrp = Create<OutputStreamWrapper> (&std::cout);
   pgwStaticRouting->PrintRoutingTable (strwrp);
 
-  std::cout << "routing table of Ue" << std::endl;
-  Ptr<Ipv4StaticRouting> ueStaticRouting =
-      ipv4RoutingHelper.GetStaticRouting (ueNodes.Get (0)->GetObject<Ipv4> ());
-  ueStaticRouting->PrintRoutingTable (strwrp);
-
   Simulator::Stop (Seconds (simTime));
 
-  // animation
-  AnimationInterface anim ("mp-lte-animation.xml"); // Mandatory
-  anim.EnablePacketMetadata (); // Optional
-  anim.EnableIpv4RouteTracking ("routingtable-wireless.xml", Seconds (0), Seconds (5),
-                                Seconds (0.25)); //Optional
-  anim.EnableIpv4L3ProtocolCounters (Seconds (1), Seconds (simTime));
+  // Animation
+  // AnimationInterface anim ("mp-lte-animation.xml"); // Mandatory
+  // anim.EnablePacketMetadata (); // Optional
+  // anim.EnableIpv4RouteTracking ("routingtable-wireless.xml", Seconds (0), Seconds (5),
+  //                               Seconds (0.25)); //Optional
+  // anim.EnableIpv4L3ProtocolCounters (Seconds (1), Seconds (simTime));
+  
+  
   Simulator::Run ();
 
   /*GtkConfigStore config;
