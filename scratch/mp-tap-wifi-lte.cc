@@ -311,8 +311,7 @@ main (int argc, char *argv[])
   YansWifiPhyHelper wifiPhy;
   wifiPhy.SetChannel (wifiChannel.Create ());
 
-  // Install the wireless devices onto our ghost nodes.
-  // NodeContainer wifiNodes (ueNodes.Get(0), ghost_nodes.Get(1)); 
+  // Install the wireless devices onto our ghost nodes. 
   NodeContainer wifiNodes (ghost_nodes.Get(0), wifiAP.Get(0)); 
   NetDeviceContainer wifiDevices = wifi.Install (wifiPhy, wifiMac, wifiNodes);
 
@@ -426,7 +425,7 @@ main (int argc, char *argv[])
   flowMonitor = flowHelper.InstallAll();
 
   // scheduling throughput to be printed every 3 seconds
-  // ThroughputMonitor (&flowHelper, flowMonitor);
+  //ThroughputMonitor (&flowHelper, flowMonitor);
 
   // print routing table of PGW
   std::cout << "routing table of PGW" << std::endl;
