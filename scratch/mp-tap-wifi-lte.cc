@@ -99,6 +99,18 @@ addBackAddress (Ptr<Node> pgw, Ptr<NetDevice> ueLteNetDev, Ipv4Address addr)
   pgwApp->SetUeAddress (imsi, addr);
 }
 
+
+/* 
+  Trace CSMA packet drop 
+ */
+void
+CsmaPhyTxDrop (std::string context, Ptr<const Packet> p)
+{
+  //Ptr <NetDevice> ndev = GetNetDeviceFromContext (context);
+
+  std::cout << p->GetUid() << std::endl << " at " << Simulator::Now(); 
+}
+
 int
 main (int argc, char *argv[])
 {
@@ -290,30 +302,37 @@ main (int argc, char *argv[])
   // Configuring WiFI path
   // ********************************************************
 
-  NodeContainer wifiAP;
-  wifiAP.Create(1);     // create AP node 
-
   // std::string phyMode ("DsssRate1Mbps");
-  // double rss = -80;  // -dBm
+  // double rss = -40;  // -dBm 
 
-  // We're going to use 802.11 A so set up a wifi helper to reflect that.
-  WifiHelper wifi;
-  wifi.SetStandard (WIFI_STANDARD_80211a);
-  wifi.SetRemoteStationManager ("ns3::ConstantRateWifiManager", "DataMode",
-                                StringValue ("OfdmRate54Mbps"));
+  NodeContainer wifiAP;
+  wifiAP.Create(1);     // create AP node
 
-  // No reason for pesky access points, so we'll use an ad-hoc network.
-  WifiMacHelper wifiMac;
-  wifiMac.SetType ("ns3::AdhocWifiMac");
-
-  // Configure the physical layer.
+  // create default  wifi  channel 
   YansWifiChannelHelper wifiChannel = YansWifiChannelHelper::Default ();
   YansWifiPhyHelper wifiPhy;
+  wifiPhy.SetPcapDataLinkType (WifiPhyHelper::DLT_IEEE802_11_RADIO);  
   wifiPhy.SetChannel (wifiChannel.Create ());
 
-  // Install the wireless devices onto our ghost nodes. 
+  // Add a mac and Set it to adhoc mode
+  WifiMacHelper wifiMac;
+  wifiMac.SetType ("ns3::AdhocWifiMac");
+  
+  // wifi helper 
+  WifiHelper wifi;
+
+  // wifi.SetStandard (WIFI_STANDARD_80211n_5GHZ);
+  //Config::SetDefault ("ns3::LogDistancePropagationLossModel::ReferenceLoss", DoubleValue (40.046));
+  
+  wifi.SetStandard (WIFI_STANDARD_80211a);
+  wifi.SetRemoteStationManager ("ns3::ConstantRateWifiManager", "DataMode",
+                                StringValue ("OfdmRate54Mbps"), 
+                                "ControlMode", StringValue ("OfdmRate24Mbps"));
+                                
   NodeContainer wifiNodes (ghost_nodes.Get(0), wifiAP.Get(0)); 
-  NetDeviceContainer wifiDevices = wifi.Install (wifiPhy, wifiMac, wifiNodes);
+
+  // dev conteiner of wifi devices starting from left 
+  NetDeviceContainer wifiDevices =  wifi.Install (wifiPhy, wifiMac, wifiNodes);
 
   // set possition for the ghost-node
   Ptr<ListPositionAllocator> positionAllocWifi = CreateObject<ListPositionAllocator> ();
@@ -324,8 +343,7 @@ main (int argc, char *argv[])
   mobility.Install (wifiAP.Get(0));
   mobility.Install (ghost_nodes.Get(0));
 
-  // install ip stack on wifi AP 
-  // InternetStackHelper internet;
+  // install ip stack on wifi AP using pre defined InternetStackHelper;
   internet.Install (wifiAP);
 
   // Assign adress to AP wifi inface
@@ -333,7 +351,7 @@ main (int argc, char *argv[])
   ipv4h.SetBase ("15.0.0.0", "255.0.0.0", "0.0.0.1");
   Ipv4InterfaceContainer wifiAPinface = ipv4h.Assign (wifiDevices.Get(1));
 
-  // Copnnect AP with right host through csma 10Gb/s and 10 ms delay
+  // Copnnect AP with right host through csma 10Gb/s and 1 ms delay
   CsmaHelper csmaHelper;
   csmaHelper.SetChannelAttribute ("DataRate", DataRateValue (DataRate ("10Gb/s")));
   csmaHelper.SetChannelAttribute ("Delay", TimeValue (MilliSeconds (path2delay)));
@@ -344,6 +362,12 @@ main (int argc, char *argv[])
   ipv4h.SetBase ("14.0.0.0", "255.0.0.0", "0.0.0.1");
   Ipv4InterfaceContainer csmaAPinface = ipv4h.Assign (csma_AP_right_devices.Get (0));
   
+  Config::ConnectFailSafe ("/NodeList/*/DeviceList/*/$ns3::CsmaNetDevice/PhyTxDrop",
+                           MakeCallback (&CsmaPhyTxDrop));
+  
+  Config::ConnectFailSafe ("/NodeList/*/DeviceList/*/$ns3::CsmaNetDevice/PhyRxDrop",
+                           MakeCallback (&CsmaPhyTxDrop));
+
 
   // add route to left lxc
   // ip route add 14.0.0.0/8 via 15.0.0.1 dev eth1
@@ -411,13 +435,13 @@ main (int argc, char *argv[])
 
   // LTE connection to ghost nodes
   // csma_right.EnablePcap ("lena-csma-right", csma_right_devices.Get (0), true);
-  // csma_right.EnablePcap ("lena-csma-right", csma_AP_right_devices.Get (1), true);
+  csma_right.EnablePcap ("lena-csma-right", csma_AP_right_devices.Get (0), true);
 
   // csma_left.EnablePcapAll("csma_lte", true);
   // csma_right.EnablePcapAll("csma_right", true);
 
   // wifi ENABLE PCAP
-  // wifiPhy.EnablePcapAll("mp-wifi-lte",true);
+  wifiPhy.EnablePcapAll("mp-wifi-lte",true);
    
   // Flow monitor
   Ptr<FlowMonitor> flowMonitor;
