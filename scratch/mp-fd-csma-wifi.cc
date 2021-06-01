@@ -78,6 +78,71 @@
 #include "ns3/ipv4-static-routing-helper.h"
 #include "ns3/ipv4-list-routing-helper.h"
 
+#include <fcntl.h>  /* O_RDWR */
+#include <string.h> /* memset(), memcpy() */
+#include <stdio.h> /* perror(), printf(), fprintf() */
+#include <stdlib.h> /* exit(), malloc(), free() */
+#include <sys/ioctl.h> /* ioctl() */
+
+/* includes for struct ifreq, etc */
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <linux/if.h>
+#include <linux/if_tun.h>
+#include <unistd.h>
+
+int tun_open( char *dev)
+{
+ 
+  struct ifreq ifr;
+  int fd, err;
+  char *clonedev = "/dev/net/tun";
+
+  /* Arguments taken by the function:
+   *
+   * char *dev: the name of an interface (or '\0'). MUST have enough
+   *   space to hold the interface name if '\0' is passed
+   * int flags: interface flags (eg, IFF_TUN etc.)
+   */
+
+   /* open the clone device */
+   if( (fd = open(clonedev, O_RDWR)) < 0 ) {
+     return fd;
+   }
+
+   /* preparation of the struct ifr, of type "struct ifreq" */
+   memset(&ifr, 0, sizeof(ifr));
+
+   //ifr.ifr_flags = flags;   /* IFF_TUN or IFF_TAP, plus maybe IFF_NO_PI */
+
+   if (*dev) {
+     /* if a device name was specified, put it in the structure; otherwise,
+      * the kernel will try to allocate the "next" device of the
+      * specified type */
+     strncpy(ifr.ifr_name, dev, IFNAMSIZ);
+     ifr.ifr_flags = IFF_TAP | IFF_NO_PI; /* TAP interface, No packet information */ 
+     std::cout<<"IT there :: "<<dev<<std::endl;
+   }
+
+   /* try to create the device */
+   if( (err = ioctl(fd, TUNSETIFF, (void *) &ifr)) < 0 ) {
+     close(fd);
+     perror("ioctl TUNSETIFF");close(fd);exit(1); 
+     return err;
+   }
+
+  /* if the operation was successful, write back the name of the
+   * interface to the variable "dev", so the caller can know
+   * it. Note that the caller MUST reserve space in *dev (see calling
+   * code below) */
+  //strcpy(dev, ifr.ifr_name);
+
+  /* this is the special file descriptor that the caller will use to talk
+   * with the virtual interface */
+  return fd; 
+
+}
+
 using namespace ns3;
 
 NS_LOG_COMPONENT_DEFINE ("TAPPingExample");
@@ -94,9 +159,10 @@ main (int argc, char *argv[])
   NS_LOG_INFO ("Ping Emulation Example with TAP");
 
   std::string deviceName ("tap0");
-  std::string remote ("192.168.1.204"); // example.com
-  std::string network ("10.1.1.0");
-  std::string mask ("255.255.255.0");
+  // std::string remote ("192.168.1.204"); // example.com
+  std::string remote ("11.0.0.2"); 
+  std::string network ("11.0.0.0");
+  std::string mask ("255.0.0.0");
   std::string pi ("no");
 
   //
@@ -117,7 +183,7 @@ main (int argc, char *argv[])
   Ipv4Address tapNetwork (network.c_str ());
   Ipv4Mask tapMask (mask.c_str ());
 
-  bool modePi = ( pi == "yes" ? true : false);
+  //bool modePi = ( pi == "yes" ? true : false);
 
   //
   // Since we are using a real piece of hardware we need to use the realtime
@@ -146,19 +212,35 @@ main (int argc, char *argv[])
   // the device into the node.
   //
   Ipv4AddressHelper addresses;
-  addresses.SetBase (tapNetwork, tapMask);
-  Ipv4Address tapIp = addresses.NewAddress ();
+  // addresses.SetBase (tapNetwork, tapMask);
+  // Ipv4Address tapIp = addresses.NewAddress ();
 
   NS_LOG_INFO ("Create Device");
-  TapFdNetDeviceHelper helper;
-  helper.SetDeviceName (deviceName);
-  helper.SetModePi (modePi);
-  helper.SetTapIpv4Address (tapIp);
-  helper.SetTapIpv4Mask (tapMask);
-  
+  // TapFdNetDeviceHelper helper;
+  // helper.SetDeviceName (deviceName);
+  // helper.SetModePi (modePi);
+  // helper.SetTapIpv4Address (tapIp);
+  // helper.SetTapIpv4Mask (tapMask);
 
-  NetDeviceContainer devices = helper.Install (node);
-  Ptr<NetDevice> device = devices.Get (0);
+  FdNetDeviceHelper fdNet;
+  NetDeviceContainer devices = fdNet.Install (node);
+
+  // get file descriptor from tap device 
+  char *dev = {"tap-left"};
+  int fd = tun_open (dev);
+  if (fd < 0)
+    {
+      std::cout << "error open tap dev :: FD " << fd << std::endl;
+    }
+  std::cout << "FD = "<< fd <<std::endl; 
+ 
+  Ptr<NetDevice> d1 = devices.Get (0);
+  Ptr<FdNetDevice> device = d1->GetObject<FdNetDevice> ();
+  device->SetFileDescriptor (fd);
+
+  //NetDeviceContainer devices = helper.Install (node);
+  // Ptr<NetDevice> device = devices.Get (0);
+  // Ptr<FdNetDevice> device = devices.Get (0)->GetObject<FdNetDevice> ();
   //device->SetFileDescriptor(23); 
 
   //
@@ -175,8 +257,8 @@ main (int argc, char *argv[])
   NS_LOG_INFO ("Create IPv4 Interface");
   Ptr<Ipv4> ipv4 = node->GetObject<Ipv4> ();
   uint32_t interface = ipv4->AddInterface (device);
-  Ipv4Address devIp = addresses.NewAddress ();
-  Ipv4InterfaceAddress address = Ipv4InterfaceAddress (devIp, tapMask);
+  Ipv4InterfaceAddress address = Ipv4InterfaceAddress (Ipv4Address ("12.0.0.1"), tapMask);
+  std::cout<<"Adress : " << address << std::endl; 
   ipv4->AddAddress (interface, address);
   ipv4->SetMetric (interface, 1);
   ipv4->SetUp (interface);
@@ -185,9 +267,10 @@ main (int argc, char *argv[])
   // Add a route to the ns-3 device so it can reach the outside world though the
   // TAP.
   //
-  Ipv4StaticRoutingHelper ipv4RoutingHelper;
-  Ptr<Ipv4StaticRouting> staticRouting = ipv4RoutingHelper.GetStaticRouting (ipv4);
-  staticRouting->SetDefaultRoute (tapIp, interface);
+  
+  // Ipv4StaticRoutingHelper ipv4RoutingHelper;
+  // Ptr<Ipv4StaticRouting> staticRouting = ipv4RoutingHelper.GetStaticRouting (ipv4);
+  // staticRouting->SetDefaultRoute (Ipv4Address ("11.0.0.1"), interface);
 
   //
   // Create the ping application.  This application knows how to send
@@ -202,7 +285,7 @@ main (int argc, char *argv[])
   node->AddApplication (app);
   app->SetStartTime (Seconds (1.0));
   app->SetStopTime (Seconds (21.0));
-
+  
   //
   // Give the application a name.  This makes life much easier when constructing
   // config paths.
@@ -217,258 +300,17 @@ main (int argc, char *argv[])
   //
   // Enable a promiscuous pcap trace to see what is coming and going on our device.
   //
-  helper.EnablePcap ("fd-tap-ping", device, true);
+  //helper.EnablePcap ("fd-tap-ping", device, true);
+
+
 
   //
   // Now, do the actual emulation.
   //
   NS_LOG_INFO ("Run Emulation.");
-  Simulator::Stop (Seconds (45.0));
+  Simulator::Stop (Seconds (65.0));
   Simulator::Run ();
   Simulator::Destroy ();
   NS_LOG_INFO ("Done.");
 }
 
-//
-// #include <iostream>
-// #include <fstream>
-
-// #include "ns3/core-module.h"
-// #include "ns3/network-module.h"
-// #include "ns3/csma-module.h"
-// #include "ns3/tap-bridge-module.h"
-// #include "ns3/internet-module.h"
-// #include "ns3/flow-monitor-helper.h"
-// #include "ns3/flow-monitor-module.h"
-// #include "ns3/netanim-module.h"
-// #include "ns3/config-store-module.h"
-// #include "ns3/wifi-module.h"
-// #include "ns3/mobility-module.h"
-
-// using namespace ns3;
-
-// NS_LOG_COMPONENT_DEFINE ("MPTapCsmaVirtualMachineExample");
-
-// void ThroughputMonitor (FlowMonitorHelper* fmhelper, Ptr<FlowMonitor> flowMon)
-// {
-//   flowMon->CheckForLostPackets();
-//   std::map<FlowId, FlowMonitor::FlowStats> flowStats = flowMon->GetFlowStats();
-//   Ptr<Ipv4FlowClassifier> classing = DynamicCast<Ipv4FlowClassifier> (fmhelper->GetClassifier());
-//   for (std::map<FlowId, FlowMonitor::FlowStats>::const_iterator stats = flowStats.begin (); stats != flowStats.end (); ++stats)
-//   {
-//     Ipv4FlowClassifier::FiveTuple fiveTuple = classing->FindFlow (stats->first);
-//     std::cout<<"Flow ID                 : " << stats->first <<" ; "<< fiveTuple.sourceAddress <<" -----> "<<fiveTuple.destinationAddress<<std::endl;
-// //  std::cout<<"Tx Packets = " << stats->second.txPackets<<std::endl;
-// //  std::cout<<"Rx Packets = " << stats->second.rxPackets<<std::endl;
-//     std::cout<<"Duration                : "<<stats->second.timeLastRxPacket.GetSeconds()-stats->second.timeFirstTxPacket.GetSeconds()<<std::endl;
-//     std::cout<<"Last Received Packet    : "<< stats->second.timeLastRxPacket.GetSeconds()<<" Seconds"<<std::endl;
-//     std::cout<<"Throughput: " << stats->second.rxBytes * 8.0 / (stats->second.timeLastRxPacket.GetSeconds()-stats->second.timeFirstTxPacket.GetSeconds())/1024/1024  << " Mbps"<<std::endl;
-//     std::cout<<"---------------------------------------------------------------------------"<<std::endl;
-//   }
-
-//  // Rescheduling the next call to this function to print throughput
-//  Simulator::Schedule(Seconds(3),&ThroughputMonitor, fmhelper, flowMon);
-
-// }
-
-// // Parse context strings of the form "/NodeList/x/DeviceList/x/..." to extract the NodeId integer
-// uint32_t
-// ContextToNodeId (std::string context)
-// {
-//   std::string sub = context.substr (10);
-//   uint32_t pos = sub.find ("/Device");
-//   return atoi (sub.substr (0, pos).c_str ());
-// }
-
-// void
-// PhyRxErrorTrace (std::string context, Ptr<const Packet> p, double snr)
-// {
-//   std::cout << "PHY-RX-ERROR time=" << Simulator::Now () << " node=" << ContextToNodeId (context)
-//             << " size=" << p->GetSize () << " snr=" << snr << std::endl;
-// }
-
-// void
-// PhyRxDropTrace (std::string context, Ptr<const Packet> p, WifiPhyRxfailureReason reason)
-// {
-//   std::cout << "PHY-RX-DROP time=" << Simulator::Now () << " node=" << ContextToNodeId (context)
-//             << " size=" << p->GetSize () << " reason=" << reason << std::endl;
-// }
-
-// int 
-// main (int argc, char *argv[])
-// {
-//   std::cout << "Start simulation "<< std::endl;
-//   CommandLine cmd (__FILE__);
-//   cmd.Parse (argc, argv);
-
-//   //Config::SetDefault ("ns3::DropTailQueue<Packet>::MaxSize", StringValue ("100p"));
-  
-  
-//   // We are interacting with the outside, real, world.  This means we have to 
-//   // interact in real-time and therefore means we have to use the real-time
-//   // simulator and take the time to calculate checksums.
-//   //
-//   GlobalValue::Bind ("SimulatorImplementationType", StringValue ("ns3::RealtimeSimulatorImpl"));
-//   GlobalValue::Bind ("ChecksumEnabled", BooleanValue (true));
-
-//   //
-//   // Create two ghost nodes.  The first will represent the virtual machine host
-//   // on the left side of the network; and the second will represent the VM on 
-//   // the right side.
-//   //
-//   NodeContainer nodes;
-//   nodes.Create (2);
-
-//   NodeContainer middle;
-//   middle.Create(1);     // create one node in the middle 
-
-//   NodeContainer left_m (nodes.Get(0), middle.Get(0));
-//   NodeContainer right_m (nodes.Get(1), middle.Get(0));
-
-//   // ./waf --run "tap=csma-virtual-machine --ns3::CsmaChannel::DataRate=10000000"
-//   //
-  
-//   // // create default  wifi  channel 
-//   // YansWifiChannelHelper wifiChannel = YansWifiChannelHelper::Default ();
-//   // YansWifiPhyHelper wifiPhy;
-//   // wifiPhy.SetChannel (wifiChannel.Create ());
-//   // // Add a mac and Set it to adhoc mode
-//   // WifiMacHelper wifiMac;
-//   // wifiMac.SetType ("ns3::AdhocWifiMac");
-//   // // wifi helper 
-//   // WifiHelper wifi;
-//   // wifi.SetStandard (WIFI_STANDARD_80211n_2_4GHZ);
-//   // Config::SetDefault ("ns3::LogDistancePropagationLossModel::ReferenceLoss", DoubleValue (40.046));
-//   // wifi.SetRemoteStationManager ("ns3::ConstantRateWifiManager",
-//   //                                       "DataMode", StringValue("HtMcs7"),
-//   //                                       "ControlMode", StringValue("HtMcs7"));
-  
-
-//   // std::string phyMode ("DsssRate1Mbps");
-  
-//   // // disable fragmentation for frames below 2200 bytes
-//   // Config::SetDefault ("ns3::WifiRemoteStationManager::FragmentationThreshold",
-//   //                     StringValue ("2200"));
-//   // // turn off RTS/CTS for frames below 2200 bytes
-//   // Config::SetDefault ("ns3::WifiRemoteStationManager::RtsCtsThreshold",
-//   //                     StringValue ("2200"));
-//   // // Fix non-unicast data rate to be the same as that of unicast
-//   // Config::SetDefault ("ns3::WifiRemoteStationManager::NonUnicastMode",
-//   //                     StringValue (phyMode));
-
-//   // Config::SetDefault ("ns3::WifiRemoteStationManager::RtsCtsThreshold", StringValue ("999999"));
-//   // YansWifiPhyHelper wifiPhy;
-
-//   // /** wifi channel **/
-//   // YansWifiChannelHelper wifiChannel;
-//   // wifiChannel.SetPropagationDelay ("ns3::ConstantSpeedPropagationDelayModel");
-//   // //wifiChannel.AddPropagationLoss ("ns3::FriisPropagationLossModel");
-//   // double rss = -80; 
-//   // wifiChannel.AddPropagationLoss ("ns3::FixedRssLossModel","Rss",DoubleValue (rss));
-
-//   // // create wifi channel
-//   // Ptr<YansWifiChannel> wifiChannelPtr = wifiChannel.Create ();
-//   // wifiPhy.SetChannel (wifiChannelPtr);
-
-//   /** Wifi PHY **/
-//   /***************************************************************************/
-//   // create default  wifi  channel 
-//   YansWifiChannelHelper wifiChannel = YansWifiChannelHelper::Default ();
-//   YansWifiPhyHelper wifiPhy;
-//   wifiPhy.SetPcapDataLinkType (WifiPhyHelper::DLT_IEEE802_11_RADIO);  
-//   wifiPhy.SetChannel (wifiChannel.Create ());
-
-//   /** MAC layer **/
-//    // Add a mac and Set it to adhoc mode
-//   WifiMacHelper wifiMac;
-//   wifiMac.SetType ("ns3::AdhocWifiMac");
-  
-//   // wifi helper 
-//   WifiHelper wifi;
-//   wifi.SetStandard (WIFI_STANDARD_80211a);
-//   wifi.SetRemoteStationManager ("ns3::ConstantRateWifiManager", "DataMode",
-//                                 StringValue ("OfdmRate54Mbps"), 
-//                                 "ControlMode", StringValue ("OfdmRate24Mbps"));
-
-  
-//   // set possition and mobility model 
-//   Ptr<ListPositionAllocator> positionAllocWifi = CreateObject<ListPositionAllocator> ();
-//   positionAllocWifi->Add (Vector (0.0, 0.0, 0.0));
-//   positionAllocWifi->Add (Vector (5, 0, 0));
-//   positionAllocWifi->Add (Vector (15, 0, 0));
-//   MobilityHelper mobility;
-//   mobility.SetPositionAllocator (positionAllocWifi);
-//   mobility.SetMobilityModel ("ns3::ConstantPositionMobilityModel");
-//   mobility.Install (left_m.Get (0));
-//   mobility.Install (left_m.Get (1));
-//   mobility.Install (nodes.Get(1)); 
-
-//   // dev conteiner of wifi devices starting from left
-//   NetDeviceContainer leftDev = wifi.Install (wifiPhy, wifiMac, left_m);
-
-//   CsmaHelper csma;
-//   csma.SetChannelAttribute ("DataRate", StringValue ("100Mbps"));
-//   csma.SetChannelAttribute ("Delay", TimeValue (MicroSeconds (5)));
-//   NetDeviceContainer rightDev = csma.Install (right_m);
-  
-//   //internet for middle 
-//   InternetStackHelper inet; 
-//   inet.Install (middle);
-
-//   // Assign adress to AP wifi inface
-//   Ipv4AddressHelper ipv4h; 
-//   ipv4h.SetBase ("15.0.0.0", "255.0.0.0", "0.0.0.1");
-//   Ipv4InterfaceContainer middle1iface = ipv4h.Assign (leftDev.Get(1));
-//   ipv4h.SetBase ("14.0.0.0", "255.0.0.0", "0.0.0.1");
-//   Ipv4InterfaceContainer middle2iface = ipv4h.Assign (rightDev.Get(1));
-
-//   //
-//   // Use the TapBridgeHelper to connect to the pre-configured tap devices for
-//   // the left side.  We go with "UseBridge" mode since the CSMA devices support
-//   // promiscuous mode and can therefore make it appear that the bridge is
-//   // extended into ns-3.  The install method essentially bridges the specified
-//   // tap to the specified CSMA device.
-//   //
-//   TapBridgeHelper tapBridge;
-//   tapBridge.SetAttribute ("Mode", StringValue ("UseLocal"));
-
-//   // tapBridge.SetAttribute ("DeviceName", StringValue ("tap-left"));
-//   // tapBridge.Install (nodes.Get (0), leftDev.Get (0));
-//   tapBridge.SetAttribute ("DeviceName", StringValue ("tap-left-1"));
-//   tapBridge.Install (nodes.Get (0), leftDev.Get (0));
-
-//   //
-//   // Connect the right side tap to the right side CSMA device on the right-side
-//   // ghost node.
-//   //
-//   // tapBridge.SetAttribute ("DeviceName", StringValue ("tap-right"));
-//   // tapBridge.Install (nodes.Get (1), devices.Get (1));
-
-//   tapBridge.SetAttribute ("DeviceName", StringValue ("tap-right-1"));
-//   tapBridge.Install (nodes.Get (1), rightDev.Get (0));
-
-//   // Trace PHY Rx error events
-//   Config::Connect ("/NodeList/*/DeviceList/*/$ns3::WifiNetDevice/Phy/$ns3::WifiPhy/State/RxError",
-//                    MakeCallback (&PhyRxErrorTrace));
-//   // Trace PHY Rx drop events
-//   Config::Connect ("/NodeList/*/DeviceList/*/$ns3::WifiNetDevice/Phy/$ns3::WifiPhy/PhyRxDrop",
-//                    MakeCallback (&PhyRxDropTrace));
-
-//   csma.EnablePcapAll ("mp-csma-3", true);
-//   // wifi ENABLE PCAP
-//   wifiPhy.EnablePcapAll ("mp-wifi-lte", true);
-
-//   Config::SetDefault ("ns3::ConfigStore::Filename", StringValue ("output-attributes.txt"));
-//   Config::SetDefault ("ns3::ConfigStore::FileFormat", StringValue ("RawText"));
-//   Config::SetDefault ("ns3::ConfigStore::Mode", StringValue ("Save"));
-//   ConfigStore outputConfig2;
-//   outputConfig2.ConfigureDefaults ();
-//   outputConfig2.ConfigureAttributes ();
-
-//   std::cout << "Stop simulation \n";
-//   Simulator::Stop (Seconds (600.0));
-//   Simulator::Run ();
-//   Simulator::Destroy ();
-  
-//   //flowMonitor->SerializeToXmlFile("mp-monitor.xml", true, true);
-// }
