@@ -77,6 +77,9 @@
 #include "ns3/internet-apps-module.h"
 #include "ns3/ipv4-static-routing-helper.h"
 #include "ns3/ipv4-list-routing-helper.h"
+#include "ns3/csma-module.h"
+#include "ns3/wifi-module.h"
+#include "ns3/mobility-module.h"
 
 #include <fcntl.h>  /* O_RDWR */
 #include <string.h> /* memset(), memcpy() */
@@ -91,7 +94,7 @@
 #include <linux/if_tun.h>
 #include <unistd.h>
 
-int tun_open( char *dev)
+int tun_open( const char *dev)
 {
  
   struct ifreq ifr;
@@ -121,7 +124,6 @@ int tun_open( char *dev)
       * specified type */
      strncpy(ifr.ifr_name, dev, IFNAMSIZ);
      ifr.ifr_flags = IFF_TAP | IFF_NO_PI; /* TAP interface, No packet information */ 
-     std::cout<<"IT there :: "<<dev<<std::endl;
    }
 
    /* try to create the device */
@@ -130,6 +132,8 @@ int tun_open( char *dev)
      perror("ioctl TUNSETIFF");close(fd);exit(1); 
      return err;
    }
+  
+  std::cout << dev<< ":  FD = "<< fd << std::endl; 
 
   /* if the operation was successful, write back the name of the
    * interface to the variable "dev", so the caller can know
@@ -158,10 +162,7 @@ main (int argc, char *argv[])
 {
   NS_LOG_INFO ("Ping Emulation Example with TAP");
 
-  std::string deviceName ("tap0");
-  // std::string remote ("192.168.1.204"); // example.com
   std::string remote ("11.0.0.2"); 
-  std::string network ("11.0.0.0");
   std::string mask ("255.0.0.0");
   std::string pi ("no");
 
@@ -170,108 +171,151 @@ main (int argc, char *argv[])
   // command-line arguments
   //
   CommandLine cmd (__FILE__);
-  cmd.AddValue ("deviceName", "Device name", deviceName);
   cmd.AddValue ("remote", "Remote IP address (dotted decimal only please)", remote);
-  cmd.AddValue ("tapNetwork", "Network address to assign the TAP device IP address (dotted decimal only please)", network);
   cmd.AddValue ("tapMask", "Network mask for configure the TAP device (dotted decimal only please)", mask);
   cmd.AddValue ("modePi", "If 'yes' a PI header will be added to the traffic traversing the device(flag IFF_NOPI will be unset).", pi);
   cmd.Parse (argc, argv);
 
-  NS_ABORT_MSG_IF (network == "1.2.3.4", "You must change the local IP address before running this example");
-
   Ipv4Address remoteIp (remote.c_str ());
-  Ipv4Address tapNetwork (network.c_str ());
   Ipv4Mask tapMask (mask.c_str ());
 
-  //bool modePi = ( pi == "yes" ? true : false);
-
-  //
-  // Since we are using a real piece of hardware we need to use the realtime
-  // simulator.
-  //
   GlobalValue::Bind ("SimulatorImplementationType", StringValue ("ns3::RealtimeSimulatorImpl"));
-
-  //
-  // Since we are going to be talking to real-world machines, we need to enable
-  // calculation of checksums in our protocols.
-  //
   GlobalValue::Bind ("ChecksumEnabled", BooleanValue (true));
 
   //
-  // In such a simple topology, the use of the helper API can be a hindrance
-  // so we drop down into the low level API and do it manually.
+  // Create two ghost nodes.  The first will represent the virtual machine host
+  // on the left side of the network; and the second will represent the VM on 
+  // the right side.
   //
-  // First we need a single node.
-  //
-  NS_LOG_INFO ("Create Node");
-  Ptr<Node> node = CreateObject<Node> ();
+  NodeContainer nodes;
+  nodes.Create (2);
 
-  // Create an fd device, set a MAC address and point the device to the
-  // Linux device name.  The device needs a transmit queueing discipline so
-  // create a droptail queue and give it to the device.  Finally, "install"
-  // the device into the node.
-  //
-  Ipv4AddressHelper addresses;
-  // addresses.SetBase (tapNetwork, tapMask);
-  // Ipv4Address tapIp = addresses.NewAddress ();
+  NodeContainer middle;
+  middle.Create(1);     // create one node in the middle 
 
-  NS_LOG_INFO ("Create Device");
-  // TapFdNetDeviceHelper helper;
-  // helper.SetDeviceName (deviceName);
-  // helper.SetModePi (modePi);
-  // helper.SetTapIpv4Address (tapIp);
-  // helper.SetTapIpv4Mask (tapMask);
+  NodeContainer left_m (nodes.Get(0), middle.Get(0));
+  NodeContainer right_m (nodes.Get(1), middle.Get(0));
 
-  FdNetDeviceHelper fdNet;
-  NetDeviceContainer devices = fdNet.Install (node);
+/** Wifi PHY **/
+  /***************************************************************************/
+  // create default  wifi  channel 
+  YansWifiChannelHelper wifiChannel = YansWifiChannelHelper::Default ();
+  YansWifiPhyHelper wifiPhy;
+  wifiPhy.SetPcapDataLinkType (WifiPhyHelper::DLT_IEEE802_11_RADIO);  
+  wifiPhy.SetChannel (wifiChannel.Create ());
 
-  // get file descriptor from tap device 
-  char *dev = {"tap-left"};
-  int fd = tun_open (dev);
-  if (fd < 0)
-    {
-      std::cout << "error open tap dev :: FD " << fd << std::endl;
-    }
-  std::cout << "FD = "<< fd <<std::endl; 
- 
-  Ptr<NetDevice> d1 = devices.Get (0);
-  Ptr<FdNetDevice> device = d1->GetObject<FdNetDevice> ();
-  device->SetFileDescriptor (fd);
+  /** MAC layer **/
+   // Add a mac and Set it to adhoc mode
+  WifiMacHelper wifiMac;
+  wifiMac.SetType ("ns3::AdhocWifiMac");
+  
+  // wifi helper 
+  WifiHelper wifi;
+  wifi.SetStandard (WIFI_STANDARD_80211a);
+  wifi.SetRemoteStationManager ("ns3::ConstantRateWifiManager", "DataMode",
+                                StringValue ("OfdmRate54Mbps"), 
+                                "ControlMode", StringValue ("OfdmRate24Mbps"));
 
-  //NetDeviceContainer devices = helper.Install (node);
-  // Ptr<NetDevice> device = devices.Get (0);
-  // Ptr<FdNetDevice> device = devices.Get (0)->GetObject<FdNetDevice> ();
-  //device->SetFileDescriptor(23); 
+  
+  // set possition and mobility model 
+  Ptr<ListPositionAllocator> positionAllocWifi = CreateObject<ListPositionAllocator> ();
+  positionAllocWifi->Add (Vector (0.0, 0.0, 0.0));
+  positionAllocWifi->Add (Vector (5, 0, 0));
+  positionAllocWifi->Add (Vector (15, 0, 0));
+  MobilityHelper mobility;
+  mobility.SetPositionAllocator (positionAllocWifi);
+  mobility.SetMobilityModel ("ns3::ConstantPositionMobilityModel");
+  mobility.Install (left_m.Get (0));
+  mobility.Install (left_m.Get (1));
+  mobility.Install (nodes.Get(1)); 
 
+  // dev conteiner of wifi devices starting from left
+  NetDeviceContainer leftDev = wifi.Install (wifiPhy, wifiMac, left_m);
+
+  CsmaHelper csma;
+  csma.SetChannelAttribute ("DataRate", StringValue ("100Mbps"));
+  csma.SetChannelAttribute ("Delay", TimeValue (MilliSeconds(1)));
+  NetDeviceContainer rightDev = csma.Install (right_m);
+  
   //
   // Add a default internet stack to the node (ARP, IPv4, ICMP, UDP and TCP).
-  //
-  NS_LOG_INFO ("Add Internet Stack");
-  InternetStackHelper internetStackHelper;
-  internetStackHelper.Install (node);
+  // 
+  InternetStackHelper inet; 
+  inet.Install (middle);
+  inet.Install (nodes); 
+
+  // Assign adress 
+  Ipv4AddressHelper ipv4h; 
+  ipv4h.SetBase ("15.0.0.0", "255.0.0.0", "0.0.0.1");
+  Ipv4InterfaceContainer apIf_wifi = ipv4h.Assign (leftDev.Get(1));
+  Ipv4InterfaceContainer leftIf_wifi = ipv4h.Assign (leftDev.Get(0));
+  ipv4h.SetBase ("14.0.0.0", "255.0.0.0", "0.0.0.1");
+  Ipv4InterfaceContainer apIf_csma = ipv4h.Assign (rightDev.Get(1));
+  Ipv4InterfaceContainer rightIf_csma = ipv4h.Assign (rightDev.Get(0));
+
+  Ipv4StaticRoutingHelper ipv4RoutingHelper;
+
+// Adding the network behind the UE to the pgw --> hardcoding the IP address of the UE connected to the external network
+  Ptr<Ipv4StaticRouting> apStaticRouting =
+      ipv4RoutingHelper.GetStaticRouting (middle.Get(0)->GetObject<Ipv4> ());
+  apStaticRouting->AddNetworkRouteTo (Ipv4Address ("11.0.0.0"), Ipv4Mask ("255.0.0.0"),
+                                       Ipv4Address ("15.0.0.2"), apIf_wifi.Get(0).second);
+  apStaticRouting->AddNetworkRouteTo (Ipv4Address ("13.0.0.0"), Ipv4Mask ("255.0.0.0"),
+                                       Ipv4Address ("14.0.0.2"), apIf_csma.Get(0).second);
+
+  // Create an fd device, set a MAC address and point the device to the
+  // Linux device name. 
+
+  FdNetDeviceHelper fdNet;
+  NetDeviceContainer tapDevs = fdNet.Install (nodes);
+
+  // get file descriptor from tap device 
+  // char *dev = {"tap-left"};
+  // int fd = tun_open (dev);
+  // if (fd < 0)
+  //   {
+  //     std::cout << "error open tap dev :: FD " << fd << std::endl;
+  //   }
+  // std::cout << "FD = "<< fd <<std::endl; 
+ 
+  Ptr<NetDevice> d1 = tapDevs.Get (0);
+  Ptr<FdNetDevice> leftFdDevice = d1->GetObject<FdNetDevice> ();
+  leftFdDevice->SetFileDescriptor (tun_open("tap-left"));
+
+  Ptr<NetDevice> d2 = tapDevs.Get (1);
+  Ptr<FdNetDevice> rightFdDevice = d2->GetObject<FdNetDevice> ();
+  rightFdDevice->SetFileDescriptor (tun_open("tap-right"));
 
   //
   // Add an address to the ns-3 device in the same network than one
   // assigned to the TAP.
-  //
-  NS_LOG_INFO ("Create IPv4 Interface");
-  Ptr<Ipv4> ipv4 = node->GetObject<Ipv4> ();
-  uint32_t interface = ipv4->AddInterface (device);
-  Ipv4InterfaceAddress address = Ipv4InterfaceAddress (Ipv4Address ("12.0.0.1"), tapMask);
-  std::cout<<"Adress : " << address << std::endl; 
+  Ptr<Ipv4> ipv4 = nodes.Get(0)->GetObject<Ipv4> ();
+  uint32_t interface = ipv4->AddInterface (leftFdDevice);
+  Ipv4InterfaceAddress address = Ipv4InterfaceAddress (Ipv4Address ("11.0.0.1"), tapMask);
+  std::cout<<"Adress 1: " << address << std::endl; 
   ipv4->AddAddress (interface, address);
-  ipv4->SetMetric (interface, 1);
+  // ipv4->SetMetric (interface, 1);
   ipv4->SetUp (interface);
-
-  //
+  
   // Add a route to the ns-3 device so it can reach the outside world though the
   // TAP.
-  //
+  // std::cout <<  << std::endl; 
   
-  // Ipv4StaticRoutingHelper ipv4RoutingHelper;
-  // Ptr<Ipv4StaticRouting> staticRouting = ipv4RoutingHelper.GetStaticRouting (ipv4);
-  // staticRouting->SetDefaultRoute (Ipv4Address ("11.0.0.1"), interface);
+  Ptr<Ipv4StaticRouting> leftStaticRouting = ipv4RoutingHelper.GetStaticRouting (ipv4);
+  leftStaticRouting->SetDefaultRoute (Ipv4Address ("15.0.0.1"), leftIf_wifi.Get(0).second);
+  
 
+  ipv4 = nodes.Get(1)->GetObject<Ipv4> ();
+  interface = ipv4->AddInterface (rightFdDevice);
+  address = Ipv4InterfaceAddress (Ipv4Address ("13.0.0.1"), tapMask);
+  std::cout<<"Adress 2: " << address << std::endl; 
+  ipv4->AddAddress (interface, address);
+  // ipv4->SetMetric (interface, 1);
+  ipv4->SetUp (interface);
+  
+  Ptr<Ipv4StaticRouting> rightStaticRouting = ipv4RoutingHelper.GetStaticRouting (ipv4);
+  rightStaticRouting->SetDefaultRoute (Ipv4Address ("14.0.0.1"), rightIf_csma.Get(0).second);
+  
   //
   // Create the ping application.  This application knows how to send
   // ICMP echo requests.  Setting up the packet sink manually is a bit
@@ -282,7 +326,7 @@ main (int argc, char *argv[])
   Ptr<V4Ping> app = CreateObject<V4Ping> ();
   app->SetAttribute ("Remote", Ipv4AddressValue (remoteIp));
   app->SetAttribute ("Verbose", BooleanValue (true) );
-  node->AddApplication (app);
+  nodes.Get(0)->AddApplication (app);
   app->SetStartTime (Seconds (1.0));
   app->SetStopTime (Seconds (21.0));
   
@@ -297,11 +341,7 @@ main (int argc, char *argv[])
   //
   Config::Connect ("/Names/app/Rtt", MakeCallback (&PingRtt));
 
-  //
-  // Enable a promiscuous pcap trace to see what is coming and going on our device.
-  //
-  //helper.EnablePcap ("fd-tap-ping", device, true);
-
+  wifiPhy.EnablePcapAll ("mp-wifi-lte", true);
 
 
   //
