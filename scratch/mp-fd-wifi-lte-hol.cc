@@ -136,7 +136,7 @@ main (int argc, char *argv[])
 {
   NS_LOG_INFO ("Ping Emulation Example with TAP");
 
-  std::string remote ("14.0.0.2"); 
+  std::string remote ("17.0.0.2"); 
   std::string mask ("255.0.0.0");
   std::string pi ("no");
   
@@ -233,23 +233,14 @@ main (int argc, char *argv[])
                                 StringValue ("OfdmRate54Mbps"), 
                                 "ControlMode", StringValue ("OfdmRate24Mbps"));
 
-  // configure CSMA connection  
-  csma.SetChannelAttribute ("DataRate", StringValue ("100Mbps"));
-  csma.SetChannelAttribute ("Delay", TimeValue (MilliSeconds (path2delay)));
-
   // Install devices on nodes from path #1
   NetDeviceContainer dev_l_ap = wifi.Install (wifiPhy, wifiMac, nodes_l_ap);
-  NetDeviceContainer dev_r_ap = csma.Install (nodes_r_ap);
   
   // Assign adress 
   ipv4h.SetBase ("16.0.0.0", "255.0.0.0", "0.0.0.1");
   Ipv4InterfaceContainer ifce_ap_wifi = ipv4h.Assign (dev_l_ap.Get(1));
   Ipv4InterfaceContainer ifce_l_wifi = ipv4h.Assign (dev_l_ap.Get(0));
-  ipv4h.SetBase ("17.0.0.0", "255.0.0.0", "0.0.0.1");
-  Ipv4InterfaceContainer ifce_ap_csma = ipv4h.Assign (dev_r_ap.Get(1));
-  Ipv4InterfaceContainer ifce_r_csma = ipv4h.Assign (dev_r_ap.Get(0));
-
-
+ 
 
   // ****************************************************************************************************************
   //                                  Configure PATH 2: LTE and CSMA 
@@ -301,6 +292,19 @@ main (int argc, char *argv[])
   Ipv4InterfaceContainer ifce_pgw_csma = ipv4h.Assign (NetDeviceContainer (dev_r_pgw.Get(1)));
   Ipv4InterfaceContainer ifce_r_csma1 = ipv4h.Assign (NetDeviceContainer (dev_r_pgw.Get(0)));
 
+
+  // create link  pgw < -- > wifi AP
+  // configure CSMA connection  
+  NodeContainer apPgw (nodeAP.Get(0),pgw); 
+  csma.SetChannelAttribute ("DataRate", StringValue ("100Mbps"));
+  csma.SetChannelAttribute ("Delay", TimeValue (MilliSeconds (path2delay)));
+
+  // Install devices 
+  NetDeviceContainer dev_ap_pgw = csma.Install (apPgw);
+  
+  // Assign adress 
+  ipv4h.SetBase ("17.0.0.0", "255.0.0.0", "0.0.0.1");
+  Ipv4InterfaceContainer ifces_ap_pgw = ipv4h.Assign (dev_ap_pgw);
   
   // ****************************************************************************************************************
   //                  Configure FDNetDevices and connect to TAP file descriptor 
@@ -385,7 +389,7 @@ main (int argc, char *argv[])
   apStaticRouting->AddNetworkRouteTo (Ipv4Address ("15.0.0.0"), Ipv4Mask ("255.0.0.0"),
                                       Ipv4Address ("16.0.0.2"), ifce_ap_wifi.Get (0).second);
   apStaticRouting->AddNetworkRouteTo (Ipv4Address ("14.0.0.0"), Ipv4Mask ("255.0.0.0"),
-                                      Ipv4Address ("17.0.0.2"), ifce_ap_csma.Get (0).second);
+                                      Ipv4Address ("17.0.0.2"), ifces_ap_pgw.Get(0).second);
 
   // ******************************** 
   // routing on left node (UE)                
@@ -407,14 +411,7 @@ main (int argc, char *argv[])
       ipv4RoutingHelper.GetStaticRouting (nodes.Get (1)->GetObject<Ipv4> ());
   // default route through LTE path
   rightStaticRouting->SetDefaultRoute (Ipv4Address ("12.0.0.1"), ifce_r_csma1.Get (0).second);
-  // add route to left lxc through wifi
-  rightStaticRouting->AddNetworkRouteTo (Ipv4Address ("15.0.0.0"), Ipv4Mask ("255.0.0.0"),
-                                         Ipv4Address ("17.0.0.1"), ifce_r_csma.Get (0).second);
-                                          // add route to left lxc through wifi
-  // do non need route to 16. just for ping test 
-  rightStaticRouting->AddNetworkRouteTo (Ipv4Address ("16.0.0.0"), Ipv4Mask ("255.0.0.0"),
-                                         Ipv4Address ("17.0.0.1"), ifce_r_csma.Get (0).second);
-
+ 
   // ********************************
   // routing on PGW node
   // ********************************
@@ -425,7 +422,11 @@ main (int argc, char *argv[])
   pgwStaticRouting->AddNetworkRouteTo (Ipv4Address ("11.0.0.0"), Ipv4Mask ("255.0.0.0"),
                                        Ipv4Address ("7.0.0.2"), 1);
   pgwStaticRouting->AddNetworkRouteTo (Ipv4Address ("13.0.0.0"), Ipv4Mask ("255.0.0.0"),
-                                       Ipv4Address ("12.0.0.2"), ifce_pgw_csma.Get(0).second); 
+                                       Ipv4Address ("12.0.0.2"), ifce_pgw_csma.Get(0).second);
+  pgwStaticRouting->AddNetworkRouteTo (Ipv4Address ("15.0.0.0"), Ipv4Mask ("255.0.0.0"),
+                                       Ipv4Address ("17.0.0.1"), ifces_ap_pgw.Get(1).second);
+  pgwStaticRouting->AddNetworkRouteTo (Ipv4Address ("14.0.0.0"), Ipv4Mask ("255.0.0.0"),
+                                       Ipv4Address ("12.0.0.2"), ifce_pgw_csma.Get(0).second);
 
   // ADD lxc mp-left address to allow "ping" through EPC-PGW node
   addBackAddress (pgw, ueLteDevs.Get (0), Ipv4Address ("11.0.0.2"));

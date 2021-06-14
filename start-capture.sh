@@ -36,16 +36,17 @@ echo "tap-right is on $i_right"
 echo "tap-right-1 is on $i_right_1"
 
 # start capture traffic on infaces
-tshark -i $i_left -a duration:$TIME -w left-0.pcap -q  &
-tshark -i $i_left_1 -a duration:$TIME -w left-1.pcap -q  &
-tshark -i $i_right -a duration:$TIME -w right-0.pcap -q  &
-tshark -i $i_right_1 -a duration:$TIME -w right-1.pcap -q  &
+sudo tshark -i $i_left -a duration:$TIME -w /tmp/left-0.pcap -q  &
+tshark -i $i_left_1 -a duration:$TIME -w /tmp/left-1.pcap -q  &
+tshark -i $i_right -a duration:$TIME -w /tmp/right-0.pcap -q  &
+tshark -i $i_right_1 -a duration:$TIME -w /tmp/right-1.pcap -q  &
 
 # start simulation 
-./waf --run "mp-tap-wifi-lte --simTime=${TIME} --path2delay=${P2delay}"
+#./waf --run "mp-tap-wifi-lte --simTime=${TIME} --path2delay=${P2delay}"
+sudo ./waf --run "mp-fd-wifi-lte --simTime=${TIME} --path2delay=${P2delay}"
 
 sleep 1
 
 # merging .pcap files 
-mergecap -w left.pcap left-0.pcap left-1.pcap
-mergecap -w right.pcap right-0.pcap right-1.pcap
+mergecap -w left.pcap /tmp/left-0.pcap /tmp/left-1.pcap
+mergecap -w right.pcap /tmp/right-0.pcap /tmp/right-1.pcap
