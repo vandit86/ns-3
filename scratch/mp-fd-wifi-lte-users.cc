@@ -205,8 +205,13 @@ main (int argc, char *argv[])
   NodeContainer nodes_l_ap (nodes.Get(0), nodeAP.Get(0));
   NodeContainer nodes_r_ap (nodes.Get(1), nodeAP.Get(0));
 
+  NodeContainer remoteNode;   // one emote node as a server 
+  remoteNode.Create(1); 
+
   NodeContainer ueAddNodes; 
-  ueAddNodes.Create(numUeNodes); 
+  ueAddNodes.Create(numUeNodes);
+
+
 
   // ****************************************
   // Helpers used in simulation 
@@ -228,7 +233,8 @@ main (int argc, char *argv[])
   // ****************************************
   inet.Install (nodeAP);
   inet.Install (nodes);
-  inet.Install (ueAddNodes);  
+  inet.Install (ueAddNodes);
+  inet.Install (remoteNode);   
 
   // ****************************************************************************************************************
   //                                  Configure PATH 1: WI-FI and CSMA 
@@ -305,7 +311,7 @@ main (int argc, char *argv[])
   // side effect: the default EPS bearer will be activated
   lteHelper->Attach (ueLteDevs.Get(0), enbLteDevs.Get (0));
 
-  // Link: PGW <---> Remote node through CSMA 
+  // Link: PGW <---> Right(R) node through CSMA 
   csma.SetChannelAttribute ("DataRate", DataRateValue (DataRate ("100Mb/s"))); 
   csma.SetChannelAttribute ("Delay", TimeValue (MilliSeconds (1)));
   NodeContainer nodes_r_pgw (nodes.Get (1), pgw);
@@ -315,6 +321,11 @@ main (int argc, char *argv[])
   ipv4h.SetBase ("12.0.0.0", "255.0.0.0", "0.0.0.1");
   Ipv4InterfaceContainer ifce_pgw_csma = ipv4h.Assign (NetDeviceContainer (dev_r_pgw.Get(1)));
   Ipv4InterfaceContainer ifce_r_csma1 = ipv4h.Assign (NetDeviceContainer (dev_r_pgw.Get(0)));
+
+  //  // Link: PGW <---> Remote node through CSMA
+  NodeContainer nodes_remote_pgw (remoteNode.Get (0), pgw);
+  NetDeviceContainer dev_remote_pgw = csma.Install (nodes_remote_pgw);
+  Ipv4InterfaceContainer ifce_remote_pgw_csma = ipv4h.Assign (dev_remote_pgw); // 12.0.0.3, 12.0.0.4
   
   // *************************************
   // Additional LTE devices in simulation
@@ -427,7 +438,7 @@ main (int argc, char *argv[])
                                       Ipv4Address ("16.0.0.1"), ifce_l_wifi.Get (0).second);
 
   // ********************************
-  // routing on right node (Remote)
+  // routing on Right(R) Node
   // ********************************
   Ptr<Ipv4StaticRouting> rightStaticRouting =
       ipv4RoutingHelper.GetStaticRouting (nodes.Get (1)->GetObject<Ipv4> ());
@@ -468,6 +479,14 @@ main (int argc, char *argv[])
       ueStaticRouting->SetDefaultRoute (epcHelper->GetUeDefaultGatewayAddress (),
                                         ueLteAddIpIfaces.Get (u).second);
     }
+
+  // ********************************
+  // routing on Remote Node
+  // ********************************
+  rightStaticRouting = ipv4RoutingHelper.GetStaticRouting (remoteNode.Get (0)->GetObject<Ipv4> ());
+  // default route through LTE path
+  rightStaticRouting->SetDefaultRoute (Ipv4Address ("12.0.0.4"),
+                                       ifce_remote_pgw_csma.Get (0).second);
 
   // ************************************************************************************************************************
   // set PPOSITION and MOBILITY model
@@ -553,7 +572,7 @@ main (int argc, char *argv[])
           UdpClientHelper dlClient (ueLteAddIpIfaces.GetAddress (u), dlPort);
           dlClient.SetAttribute ("Interval", TimeValue (interPacketInterval));
           dlClient.SetAttribute ("MaxPackets", UintegerValue (1000000));
-          clientApps.Add (dlClient.Install (nodes.Get (1)));              // download from remote 
+          clientApps.Add (dlClient.Install (remoteNode.Get (0)));              // download from remote 
         }
     }
 

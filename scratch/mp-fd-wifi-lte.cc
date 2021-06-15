@@ -291,7 +291,7 @@ main (int argc, char *argv[])
   lteHelper->Attach (ueLteDevs.Get(0), enbLteDevs.Get (0));
 
   // Link: PGW <---> Remote node through CSMA 
-  csma.SetChannelAttribute ("DataRate", DataRateValue (DataRate ("100Mb/s"))); 
+  csma.SetChannelAttribute ("DataRate", DataRateValue (DataRate ("10Mb/s"))); 
   csma.SetChannelAttribute ("Delay", TimeValue (MilliSeconds (1)));
   NodeContainer nodes_r_pgw (nodes.Get (1), pgw);
   NetDeviceContainer dev_r_pgw = csma.Install (nodes_r_pgw);
