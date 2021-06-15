@@ -42,8 +42,8 @@ tshark -i $i_right -a duration:$TIME -w /tmp/right-0.pcap -q  &
 tshark -i $i_right_1 -a duration:$TIME -w /tmp/right-1.pcap -q  &
 
 # start simulation 
-#./waf --run "mp-tap-wifi-lte --simTime=${TIME} --path2delay=${P2delay}"
-sudo ./waf --run "mp-fd-wifi-lte --simTime=${TIME} --path2delay=${P2delay}"
+ sudo ./waf --run "mp-fd-wifi-lte --simTime=${TIME} --path2delay=${P2delay}"
+#sudo ./waf --run "mp-fd-wifi-lte-users --simTime=${TIME} --path2delay=${P2delay} --numUeNodes=10 --interPacket=10"
 
 sleep 1
 

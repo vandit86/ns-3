@@ -142,7 +142,7 @@ main (int argc, char *argv[])
 {
   NS_LOG_INFO ("Ping Emulation Example with TAP");
 
-  std::string remote ("14.0.0.2"); 
+  std::string remote ("17.0.0.2"); 
   std::string mask ("255.0.0.0");
   std::string pi ("no");
   
@@ -156,6 +156,7 @@ main (int argc, char *argv[])
   uint16_t numUeNodes = 0;            // number of additional ue nodes in simulation 
   double distance = 60.0;             // distance beetwean  
   bool disableDl = false;             // enable / disable download app on additional EU nodes 
+  uint64_t interPacketInterval = 100; // inter-packet interval for UDP application [ms] 
   
   //
   // Allow the user to override any of the defaults at run-time, via
@@ -168,6 +169,8 @@ main (int argc, char *argv[])
   cmd.AddValue("simTime", "Total duration of the simulation [s])", simTime);
   cmd.AddValue("path2delay", "delay between AP and remote host on second path [ms]", path2delay);
   cmd.AddValue("numUeNodes", "number of additional ue nodes in simulation", numUeNodes);
+  cmd.AddValue("interPacket", "inter-packet interval for UDP application [ms], default 100 ms", interPacketInterval);
+
   cmd.Parse (argc, argv);
 
   // TODO:: remove or change 
@@ -176,6 +179,7 @@ main (int argc, char *argv[])
 
   GlobalValue::Bind ("SimulatorImplementationType", StringValue ("ns3::RealtimeSimulatorImpl"));
   GlobalValue::Bind ("ChecksumEnabled", BooleanValue (true));
+  // --ns3::RealtimeSimulatorImpl::SynchronizationMode=HardLimit
 
   // ****************************************
   // Global configurations  
@@ -257,6 +261,7 @@ main (int argc, char *argv[])
   // configure CSMA connection  
   csma.SetChannelAttribute ("DataRate", StringValue ("100Mbps"));
   csma.SetChannelAttribute ("Delay", TimeValue (MilliSeconds (path2delay)));
+  // csma.SetChannelAttribute ("Delay", TimeValue (NanoSeconds (path2delay)));
 
   // Install devices on nodes from path #1
   NetDeviceContainer dev_l_ap = wifi.Install (wifiPhy, wifiMac, nodes_l_ap);
@@ -314,6 +319,7 @@ main (int argc, char *argv[])
   // Link: PGW <---> Right(R) node through CSMA 
   csma.SetChannelAttribute ("DataRate", DataRateValue (DataRate ("100Mb/s"))); 
   csma.SetChannelAttribute ("Delay", TimeValue (MilliSeconds (1)));
+  // csma.SetChannelAttribute ("Delay", TimeValue (NanoSeconds (1)));
   NodeContainer nodes_r_pgw (nodes.Get (1), pgw);
   NetDeviceContainer dev_r_pgw = csma.Install (nodes_r_pgw);
 
@@ -436,6 +442,9 @@ main (int argc, char *argv[])
   // add route to right lxc through wifi
   ueStaticRouting->AddNetworkRouteTo (Ipv4Address ("14.0.0.0"), Ipv4Mask ("255.0.0.0"),
                                       Ipv4Address ("16.0.0.1"), ifce_l_wifi.Get (0).second);
+  // do non need this route to 17. just for ping test
+  ueStaticRouting->AddNetworkRouteTo (Ipv4Address ("17.0.0.0"), Ipv4Mask ("255.0.0.0"),
+                                         Ipv4Address ("16.0.0.1"), ifce_l_wifi.Get (0).second);
 
   // ********************************
   // routing on Right(R) Node
@@ -538,7 +547,7 @@ main (int argc, char *argv[])
   app->SetAttribute ("Verbose", BooleanValue (true));
   nodes.Get(0)->AddApplication (app);
   app->SetStartTime (Seconds (1.0));
-  app->SetStopTime (Seconds (11.0));
+  app->SetStopTime (Seconds (simTime-1));
   
   //
   // Give the application a name.  This makes life much easier when constructing
@@ -559,7 +568,6 @@ main (int argc, char *argv[])
   uint16_t dlPort = 1100;
   //uint16_t ulPort = 2000;
   //uint16_t otherPort = 3000;
-  Time interPacketInterval = MilliSeconds (10);
   ApplicationContainer clientApps;
   ApplicationContainer serverApps;
   for (uint32_t u = 0; u < ueAddNodes.GetN (); ++u)
@@ -570,7 +578,7 @@ main (int argc, char *argv[])
                                                InetSocketAddress (Ipv4Address::GetAny (), dlPort));
           serverApps.Add (dlPacketSinkHelper.Install (ueAddNodes.Get (u)));
           UdpClientHelper dlClient (ueLteAddIpIfaces.GetAddress (u), dlPort);
-          dlClient.SetAttribute ("Interval", TimeValue (interPacketInterval));
+          dlClient.SetAttribute ("Interval", TimeValue (MilliSeconds (interPacketInterval)));
           dlClient.SetAttribute ("MaxPackets", UintegerValue (1000000));
           clientApps.Add (dlClient.Install (remoteNode.Get (0)));              // download from remote 
         }
