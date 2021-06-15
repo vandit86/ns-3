@@ -30,6 +30,7 @@
 #include "ns3/epc-helper.h"
 #include "ns3/lte-module.h"
 #include "ns3/config-store.h"
+#include "ns3/applications-module.h" //<-- for app 
 
 #include <fcntl.h>  /* O_RDWR */
 #include <string.h> /* memset(), memcpy() */
@@ -101,6 +102,11 @@ PingRtt (std::string context, Time rtt)
   NS_LOG_UNCOND ("Received Response with RTT = " << rtt);
 }
 
+static void SinkRx (Ptr<const Packet> p, const Address &ad)
+{
+  std::cout << p->GetSize() << std::endl;
+}
+
 /**
    * Set the address of a previously added UE
    * \brief  we need to add address of lxc container connected through wired (CSMA) connection to the UE because in LENA, in 
@@ -147,6 +153,10 @@ main (int argc, char *argv[])
   std::string tap_r1 ("tap-right-1");
   uint64_t path2delay = 1;            // delay between AP and remote host [ms]
   double simTime = 60;                // sim time, 1 min by default 
+  uint16_t numUeNodes = 0;            // number of additional ue nodes in simulation 
+  double distance = 60.0;             // distance beetwean  
+  bool disableDl = false;             // enable / disable download app on additional EU nodes 
+  
   //
   // Allow the user to override any of the defaults at run-time, via
   // command-line arguments
@@ -155,8 +165,9 @@ main (int argc, char *argv[])
   cmd.AddValue ("remote", "Remote IP address (dotted decimal only please)", remote);
   cmd.AddValue ("tapMask", "Network mask for configure the TAP device (dotted decimal only please)", mask);
   cmd.AddValue ("modePi", "If 'yes' a PI header will be added to the traffic traversing the device(flag IFF_NOPI will be unset).", pi);
-   cmd.AddValue("simTime", "Total duration of the simulation [s])", simTime);
+  cmd.AddValue("simTime", "Total duration of the simulation [s])", simTime);
   cmd.AddValue("path2delay", "delay between AP and remote host on second path [ms]", path2delay);
+  cmd.AddValue("numUeNodes", "number of additional ue nodes in simulation", numUeNodes);
   cmd.Parse (argc, argv);
 
   // TODO:: remove or change 
@@ -194,6 +205,9 @@ main (int argc, char *argv[])
   NodeContainer nodes_l_ap (nodes.Get(0), nodeAP.Get(0));
   NodeContainer nodes_r_ap (nodes.Get(1), nodeAP.Get(0));
 
+  NodeContainer ueAddNodes; 
+  ueAddNodes.Create(numUeNodes); 
+
   // ****************************************
   // Helpers used in simulation 
   // ****************************************
@@ -213,7 +227,8 @@ main (int argc, char *argv[])
   // Add a default internet stack to the node (ARP, IPv4, ICMP, UDP and TCP).
   // ****************************************
   inet.Install (nodeAP);
-  inet.Install (nodes); 
+  inet.Install (nodes);
+  inet.Install (ueAddNodes);  
 
   // ****************************************************************************************************************
   //                                  Configure PATH 1: WI-FI and CSMA 
@@ -233,7 +248,7 @@ main (int argc, char *argv[])
                                 StringValue ("OfdmRate54Mbps"), 
                                 "ControlMode", StringValue ("OfdmRate24Mbps"));
 
-  // configure CSMA AP <--> REMOTE 
+  // configure CSMA connection  
   csma.SetChannelAttribute ("DataRate", StringValue ("100Mbps"));
   csma.SetChannelAttribute ("Delay", TimeValue (MilliSeconds (path2delay)));
 
@@ -300,8 +315,19 @@ main (int argc, char *argv[])
   ipv4h.SetBase ("12.0.0.0", "255.0.0.0", "0.0.0.1");
   Ipv4InterfaceContainer ifce_pgw_csma = ipv4h.Assign (NetDeviceContainer (dev_r_pgw.Get(1)));
   Ipv4InterfaceContainer ifce_r_csma1 = ipv4h.Assign (NetDeviceContainer (dev_r_pgw.Get(0)));
-
   
+  // *************************************
+  // Additional LTE devices in simulation
+  // *************************************
+  NetDeviceContainer ueLteAddDevs = lteHelper->InstallUeDevice (ueAddNodes);
+  // Assign IP address to UEs
+  Ipv4InterfaceContainer ueLteAddIpIfaces = epcHelper->AssignUeIpv4Address (NetDeviceContainer (ueLteAddDevs));
+
+  // attach to the same eNB
+  lteHelper->Attach(ueLteAddDevs, enbLteDevs.Get(0)); 
+
+
+
   // ****************************************************************************************************************
   //                  Configure FDNetDevices and connect to TAP file descriptor 
   // ****************************************************************************************************************
@@ -429,15 +455,29 @@ main (int argc, char *argv[])
 
   // ADD lxc mp-left address to allow "ping" through EPC-PGW node
   addBackAddress (pgw, ueLteDevs.Get (0), Ipv4Address ("11.0.0.2"));
+
+  // ****************************************
+  // routing for additional nodes
+  // ****************************************
+    // defoul route throug lte
+  for (uint32_t u = 0; u < ueAddNodes.GetN (); ++u)
+    {
+      Ptr<Node> ueNode = ueAddNodes.Get (u);
+      // Set the default gateway for the UE
+      ueStaticRouting = ipv4RoutingHelper.GetStaticRouting (ueNode->GetObject<Ipv4> ());
+      ueStaticRouting->SetDefaultRoute (epcHelper->GetUeDefaultGatewayAddress (),
+                                        ueLteAddIpIfaces.Get (u).second);
+    }
+
+  // ************************************************************************************************************************
+  // set PPOSITION and MOBILITY model
+  // ************************************************************************************************************************
   
-  // ****************************************
-  // set possition and mobility model
-  // ****************************************
   Ptr<ListPositionAllocator> positionAlloc = CreateObject<ListPositionAllocator> ();
   positionAlloc->Add (Vector (0, 0, 0));    // pos of left
   positionAlloc->Add (Vector (5, 0, 0));    // pos of AP
-  positionAlloc->Add (Vector (25, 0, 0));   // pos of right
-  positionAlloc->Add (Vector (30, 0, 0));   // pos of eNodeB
+  positionAlloc->Add (Vector (distance/2, distance/2, 0));   // pos of right
+  positionAlloc->Add (Vector (distance, distance, 0));   // pos of eNodeB
 
   mobility.SetPositionAllocator (positionAlloc);
   mobility.SetMobilityModel ("ns3::ConstantPositionMobilityModel");
@@ -445,6 +485,24 @@ main (int argc, char *argv[])
   mobility.Install (nodeAP.Get (0));
   mobility.Install (nodes.Get(1));
   mobility.Install (enbNode.Get(0));
+
+  //TODO: merge my ue node with other ue nodes when allocate position to ue 
+
+  // mobility for additional nodes 
+  mobility.SetPositionAllocator ("ns3::GridPositionAllocator",
+                                 "MinX", DoubleValue (0.0),
+                                 "MinY", DoubleValue (0.0),
+                                 "DeltaX", DoubleValue (5.0),
+                                 "DeltaY", DoubleValue (5.0),
+                                 "GridWidth", UintegerValue (10),
+                                 "LayoutType", StringValue ("RowFirst"));
+
+  // mobility.SetMobilityModel ("ns3::RandomWalk2dMobilityModel",
+  //                            "Bounds", RectangleValue (Rectangle (-50, 50, -50, 50)));
+  
+  mobility.SetMobilityModel ("ns3::ConstantPositionMobilityModel");
+  mobility.Install (ueAddNodes);  
+
 
   // ****************************************************************************************************************
   //                        Configure APPLICATIONS 
@@ -474,10 +532,45 @@ main (int argc, char *argv[])
   //
   Config::Connect ("/Names/app/Rtt", MakeCallback (&PingRtt));
 
-  wifiPhy.EnablePcapAll ("mp-wifi", true);
-  csma.EnablePcapAll("mp-csma", true);
-  fdNet.EnablePcapAll("mp-fd",true);  
+  // ****************************************
+  // Applications for UE additional nodes
+  // ****************************************
 
+  // Install and start applications on UEs and remote host
+  uint16_t dlPort = 1100;
+  //uint16_t ulPort = 2000;
+  //uint16_t otherPort = 3000;
+  Time interPacketInterval = MilliSeconds (10);
+  ApplicationContainer clientApps;
+  ApplicationContainer serverApps;
+  for (uint32_t u = 0; u < ueAddNodes.GetN (); ++u)
+    {
+      if (!disableDl)                                                   // download app 
+        {
+          PacketSinkHelper dlPacketSinkHelper ("ns3::UdpSocketFactory",
+                                               InetSocketAddress (Ipv4Address::GetAny (), dlPort));
+          serverApps.Add (dlPacketSinkHelper.Install (ueAddNodes.Get (u)));
+          UdpClientHelper dlClient (ueLteAddIpIfaces.GetAddress (u), dlPort);
+          dlClient.SetAttribute ("Interval", TimeValue (interPacketInterval));
+          dlClient.SetAttribute ("MaxPackets", UintegerValue (1000000));
+          clientApps.Add (dlClient.Install (nodes.Get (1)));              // download from remote 
+        }
+    }
+
+  serverApps.Start (MilliSeconds (500));
+  clientApps.Start (MilliSeconds (500));
+
+   // then, print what the packet sink receives.
+  // Config::ConnectWithoutContext ("/NodeList/*/ApplicationList/*/$ns3::PacketSink/Rx", 
+  //                                MakeCallback (&SinkRx));
+
+  // ********************************************************
+  // Debug: enable Pcap
+  // ********************************************************
+
+  wifiPhy.EnablePcapAll ("mp-wifi", true);
+  csma.EnablePcapAll ("mp-csma", true);
+  fdNet.EnablePcapAll ("mp-fd", true);
 
   // ********************************************************
   // Debug: Testing that proper IP addresses are configured
