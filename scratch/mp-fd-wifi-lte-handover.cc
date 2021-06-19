@@ -126,6 +126,24 @@ addBackAddress (Ptr<Node> pgw, Ptr<NetDevice> ueLteNetDev, Ipv4Address addr)
   pgwApp->SetUeAddress (imsi, addr);
 }
 
+//
+// This function will be used below as a trace sink, if the command-line
+// argument or default value "useCourseChangeCallback" is set to true
+//
+static void
+CourseChangeCallback (std::string path, Ptr<const MobilityModel> model)
+{
+  Vector position = model->GetPosition ();
+  std::cout << "CourseChange " << path << " x=" << position.x << ", y=" << position.y << ", z=" << position.z << std::endl;
+}
+
+void ShowPos (Ptr<MobilityModel> mm ){
+  //  = this->GetObject<MobilityModel> ();
+  Vector currentPosition = mm->GetPosition ();
+  std::cout<< currentPosition << std::endl; 
+  Simulator::Schedule(Seconds(1),&ShowPos, mm);
+}
+
 // ****************************************************************************************************************
 // ****************************************************************************************************************
 //                                      MAIN
@@ -148,6 +166,7 @@ main (int argc, char *argv[])
   uint64_t path2delay = 1;            // delay between AP and remote host [ms]
   double path2err = 0.0;            // packet error rate on path 2 
   double simTime = 60;                // sim time, 1 min by default 
+  bool useCourseChangeCallback = true; 
   //
   // Allow the user to override any of the defaults at run-time, via
   // command-line arguments
@@ -243,11 +262,11 @@ main (int argc, char *argv[])
   NetDeviceContainer dev_l_ap = wifi.Install (wifiPhy, wifiMac, nodes_l_ap);
   NetDeviceContainer dev_r_ap = csma.Install (nodes_r_ap);
   
-  // error model : probability of packet loss in one dev on the path 
+  // error model
   Ptr<RateErrorModel> em1 = CreateObjectWithAttributes<RateErrorModel> (
       "ErrorRate", DoubleValue (path2err), "ErrorUnit", EnumValue (RateErrorModel::ERROR_UNIT_PACKET));
-  dev_r_ap.Get (1)->SetAttribute ("ReceiveErrorModel", PointerValue (em1)); 
-  // dev_r_ap.Get (0)->SetAttribute ("ReceiveErrorModel", PointerValue (em1));
+  dev_r_ap.Get (1)->SetAttribute ("ReceiveErrorModel", PointerValue (em1));
+  dev_r_ap.Get (0)->SetAttribute ("ReceiveErrorModel", PointerValue (em1));
 
   // Assign adress 
   ipv4h.SetBase ("16.0.0.0", "255.0.0.0", "0.0.0.1");
@@ -440,20 +459,32 @@ main (int argc, char *argv[])
   addBackAddress (pgw, ueLteDevs.Get (0), Ipv4Address ("11.0.0.2"));
   
   // ****************************************
-  // set possition and mobility model
+  //  set PPOSITION and MOBILITY model
   // ****************************************
   Ptr<ListPositionAllocator> positionAlloc = CreateObject<ListPositionAllocator> ();
-  positionAlloc->Add (Vector (0, 0, 0));    // pos of left
+  //positionAlloc->Add (Vector (0, 0, 0));    // pos of left
   positionAlloc->Add (Vector (5, 0, 0));    // pos of AP
   positionAlloc->Add (Vector (25, 0, 0));   // pos of right
   positionAlloc->Add (Vector (30, 0, 0));   // pos of eNodeB
 
   mobility.SetPositionAllocator (positionAlloc);
   mobility.SetMobilityModel ("ns3::ConstantPositionMobilityModel");
-  mobility.Install (nodes.Get (0));
+  //mobility.Install (nodes.Get (0));
   mobility.Install (nodeAP.Get (0));
   mobility.Install (nodes.Get(1));
   mobility.Install (enbNode.Get(0));
+
+  Ptr<WaypointMobilityModel> m_mob1; ///< mobility model 1
+  m_mob1 = CreateObject<WaypointMobilityModel> ();
+  m_mob1->GetObject<WaypointMobilityModel> ()->AddWaypoint (
+      Waypoint (Seconds (5), Vector (0, 0, 0)));
+  m_mob1->GetObject<WaypointMobilityModel> ()->AddWaypoint (
+      Waypoint (Seconds (simTime/2), Vector (60, 0, 0)));
+  m_mob1->GetObject<WaypointMobilityModel> ()->AddWaypoint (
+      Waypoint (Seconds (simTime-1), Vector (0, 0, 0)));
+  m_mob1->SetPosition (Vector (0.0, 0.0, 0.0));
+
+  nodes.Get (0)->AggregateObject (m_mob1);
 
   // ****************************************************************************************************************
   //                        Configure APPLICATIONS 
@@ -487,6 +518,11 @@ main (int argc, char *argv[])
   csma.EnablePcapAll("mp-csma", true);
   fdNet.EnablePcapAll("mp-fd",true);  
 
+   if (useCourseChangeCallback == true)
+    {
+      Config::Connect ("/NodeList/*/$ns3::MobilityModel/CourseChange", MakeCallback (&CourseChangeCallback));
+      ShowPos(m_mob1); 
+    }
 
   // ********************************************************
   // Debug: Testing that proper IP addresses are configured
