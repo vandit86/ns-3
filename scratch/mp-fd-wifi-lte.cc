@@ -146,6 +146,7 @@ main (int argc, char *argv[])
   std::string tap_r ("tap-right");
   std::string tap_r1 ("tap-right-1");
   uint64_t path2delay = 1;            // delay between AP and remote host [ms]
+  double path2err = 0.0;            // packet error rate on path 2 
   double simTime = 60;                // sim time, 1 min by default 
   //
   // Allow the user to override any of the defaults at run-time, via
@@ -157,6 +158,7 @@ main (int argc, char *argv[])
   cmd.AddValue ("modePi", "If 'yes' a PI header will be added to the traffic traversing the device(flag IFF_NOPI will be unset).", pi);
    cmd.AddValue("simTime", "Total duration of the simulation [s])", simTime);
   cmd.AddValue("path2delay", "delay between AP and remote host on second path [ms]", path2delay);
+  cmd.AddValue("path2err", "packet error rate between AP and remote host on second path [ms]", path2err);
   cmd.Parse (argc, argv);
 
   // TODO:: remove or change 
@@ -241,6 +243,12 @@ main (int argc, char *argv[])
   NetDeviceContainer dev_l_ap = wifi.Install (wifiPhy, wifiMac, nodes_l_ap);
   NetDeviceContainer dev_r_ap = csma.Install (nodes_r_ap);
   
+  // error model
+  Ptr<RateErrorModel> em1 = CreateObjectWithAttributes<RateErrorModel> (
+      "ErrorRate", DoubleValue (path2err), "ErrorUnit", EnumValue (RateErrorModel::ERROR_UNIT_PACKET));
+  dev_r_ap.Get (1)->SetAttribute ("ReceiveErrorModel", PointerValue (em1));
+  dev_r_ap.Get (0)->SetAttribute ("ReceiveErrorModel", PointerValue (em1));
+
   // Assign adress 
   ipv4h.SetBase ("16.0.0.0", "255.0.0.0", "0.0.0.1");
   Ipv4InterfaceContainer ifce_ap_wifi = ipv4h.Assign (dev_l_ap.Get(1));
@@ -295,6 +303,7 @@ main (int argc, char *argv[])
   csma.SetChannelAttribute ("Delay", TimeValue (MilliSeconds (1)));
   NodeContainer nodes_r_pgw (nodes.Get (1), pgw);
   NetDeviceContainer dev_r_pgw = csma.Install (nodes_r_pgw);
+
 
   // and assign ipv4 adress to ifaces  
   ipv4h.SetBase ("12.0.0.0", "255.0.0.0", "0.0.0.1");
