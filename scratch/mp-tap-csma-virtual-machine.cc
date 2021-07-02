@@ -65,18 +65,48 @@
 #include "ns3/network-module.h"
 #include "ns3/csma-module.h"
 #include "ns3/tap-bridge-module.h"
+#include "ns3/internet-module.h"
+#include "ns3/flow-monitor-helper.h"
+#include "ns3/flow-monitor-module.h"
+#include "ns3/netanim-module.h"
+#include "ns3/config-store-module.h"
 
 using namespace ns3;
 
-NS_LOG_COMPONENT_DEFINE ("TapCsmaVirtualMachineExample");
+NS_LOG_COMPONENT_DEFINE ("MPTapCsmaVirtualMachineExample");
+
+void ThroughputMonitor (FlowMonitorHelper* fmhelper, Ptr<FlowMonitor> flowMon)
+{
+  flowMon->CheckForLostPackets();
+  std::map<FlowId, FlowMonitor::FlowStats> flowStats = flowMon->GetFlowStats();
+  Ptr<Ipv4FlowClassifier> classing = DynamicCast<Ipv4FlowClassifier> (fmhelper->GetClassifier());
+  for (std::map<FlowId, FlowMonitor::FlowStats>::const_iterator stats = flowStats.begin (); stats != flowStats.end (); ++stats)
+  {
+    Ipv4FlowClassifier::FiveTuple fiveTuple = classing->FindFlow (stats->first);
+    std::cout<<"Flow ID                 : " << stats->first <<" ; "<< fiveTuple.sourceAddress <<" -----> "<<fiveTuple.destinationAddress<<std::endl;
+//  std::cout<<"Tx Packets = " << stats->second.txPackets<<std::endl;
+//  std::cout<<"Rx Packets = " << stats->second.rxPackets<<std::endl;
+    std::cout<<"Duration                : "<<stats->second.timeLastRxPacket.GetSeconds()-stats->second.timeFirstTxPacket.GetSeconds()<<std::endl;
+    std::cout<<"Last Received Packet    : "<< stats->second.timeLastRxPacket.GetSeconds()<<" Seconds"<<std::endl;
+    std::cout<<"Throughput: " << stats->second.rxBytes * 8.0 / (stats->second.timeLastRxPacket.GetSeconds()-stats->second.timeFirstTxPacket.GetSeconds())/1024/1024  << " Mbps"<<std::endl;
+    std::cout<<"---------------------------------------------------------------------------"<<std::endl;
+  }
+
+ // Rescheduling the next call to this function to print throughput
+ Simulator::Schedule(Seconds(3),&ThroughputMonitor, fmhelper, flowMon);
+
+}
 
 int 
 main (int argc, char *argv[])
 {
+  std::cout << "Start simulation "<< std::endl;
   CommandLine cmd (__FILE__);
   cmd.Parse (argc, argv);
 
-  //
+  //Config::SetDefault ("ns3::DropTailQueue<Packet>::MaxSize", StringValue ("100p"));
+  
+  
   // We are interacting with the outside, real, world.  This means we have to 
   // interact in real-time and therefore means we have to use the real-time
   // simulator and take the time to calculate checksums.
@@ -92,6 +122,10 @@ main (int argc, char *argv[])
   NodeContainer nodes;
   nodes.Create (2);
 
+  // NodeContainer nodes_2;
+  // nodes_2.Create(2);
+
+
   //
   // Use a CsmaHelper to get a CSMA channel created, and the needed net 
   // devices installed on both of the nodes.  The data rate and delay for the
@@ -100,7 +134,22 @@ main (int argc, char *argv[])
   // ./waf --run "tap=csma-virtual-machine --ns3::CsmaChannel::DataRate=10000000"
   //
   CsmaHelper csma;
+  //csma.Install()
+  csma.SetChannelAttribute ("DataRate", StringValue ("100Mbps"));
+  csma.SetChannelAttribute ("Delay", TimeValue (MicroSeconds (5)));
   NetDeviceContainer devices = csma.Install (nodes);
+  
+  csma.SetChannelAttribute ("DataRate", StringValue ("100Mbps"));
+  csma.SetChannelAttribute ("Delay", TimeValue (MicroSeconds (5)));
+  NetDeviceContainer devices_1 = csma.Install (nodes);
+  
+  // debug 
+  DataRateValue dr_value ;
+  TimeValue delay_value ;   
+  devices.Get(1)->GetChannel()->GetAttribute("DataRate", dr_value); 
+  devices.Get(1)->GetChannel()->GetAttribute("Delay", delay_value); 
+  std::cout<< " DAta rate ::  "<< dr_value.Get();
+  std::cout<< " delay ::  "<< delay_value.Get();
 
   //
   // Use the TapBridgeHelper to connect to the pre-configured tap devices for 
@@ -109,23 +158,59 @@ main (int argc, char *argv[])
   // extended into ns-3.  The install method essentially bridges the specified
   // tap to the specified CSMA device.
   //
-  TapBridgeHelper tapBridge;
+  TapBridgeHelper tapBridge; 
   tapBridge.SetAttribute ("Mode", StringValue ("UseBridge"));
+   
   tapBridge.SetAttribute ("DeviceName", StringValue ("tap-left"));
   tapBridge.Install (nodes.Get (0), devices.Get (0));
+  tapBridge.SetAttribute ("DeviceName", StringValue ("tap-left-1"));
+  tapBridge.Install (nodes.Get (0), devices_1.Get (0));
   
-
   //
   // Connect the right side tap to the right side CSMA device on the right-side
   // ghost node.
   //
   tapBridge.SetAttribute ("DeviceName", StringValue ("tap-right"));
   tapBridge.Install (nodes.Get (1), devices.Get (1));
+  
+  tapBridge.SetAttribute ("DeviceName", StringValue ("tap-right-1"));
+  tapBridge.Install (nodes.Get (1), devices_1.Get (1));
 
+  csma.EnablePcapAll("mp-csma",true);
+  //csma.EnablePcap() 
   //
+  // Flow monitor
+  // Ptr<FlowMonitor> flowMonitor;
+  // FlowMonitorHelper flowHelper;
+  // flowMonitor = flowHelper.InstallAll(); 
+
+  // scheduling throughput to be printed every 3 seconds
+  //ThroughputMonitor(&flowHelper, flowMonitor);
+
+
   // Run the simulation for ten minutes to give the user time to play around
   //
-  Simulator::Stop (Seconds (600.));
+
+  //ns3::Ipv4GlobalRoutingHelper::PopulateRoutingTables ();
+  
+  // Create the animation object and configure for specified output
+  //AnimationInterface anim ("mp-anim.xml");
+  //anim.EnablePacketMetadata (); // Optional
+
+  // Output config store to txt format
+  // Config::SetDefault ("ns3::TcpL4Protocol::SocketType", StringValue ("ns3::TcpNewReno"));
+  Config::SetDefault ("ns3::ConfigStore::Filename", StringValue ("output-attributes.txt"));
+  Config::SetDefault ("ns3::ConfigStore::FileFormat", StringValue ("RawText"));
+  Config::SetDefault ("ns3::ConfigStore::Mode", StringValue ("Save"));
+  ConfigStore outputConfig2;
+  outputConfig2.ConfigureDefaults ();
+  outputConfig2.ConfigureAttributes ();
+   
+
+  std::cout << "Stop simulation \n"; 
+  Simulator::Stop (Seconds (600.0));
   Simulator::Run ();
   Simulator::Destroy ();
+  
+  //flowMonitor->SerializeToXmlFile("mp-monitor.xml", true, true);
 }

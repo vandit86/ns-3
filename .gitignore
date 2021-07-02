@@ -1,3 +1,12 @@
+# Ignore everything on scratch by default, except the provided examples
+!.gitignore
+
+*.xpl
+*.json
+*.txt
+*.xml
+*.flowmon
+
 *.diff
 *.orig
 *.patch
@@ -15,6 +24,8 @@
 *.plt
 *.routes
 *.tr
+*.gif
+*.png
 [D|U]l[A-Z][a-z]*Stats.txt
 
 \#*#

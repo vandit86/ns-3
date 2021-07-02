@@ -50,31 +50,47 @@
 //       +-------|  tap   |    |  tap   |-------+
 //               | bridge |    | bridge |
 //               +--------+    +--------+
-//               |  CSMA  |    |  CSMA  |
+//               |  wifi  |    |  wifi  |
 //               +--------+    +--------+
 //                   |             |
-//                   |             |
-//                   |             |
-//                   ===============
-//                      CSMA LAN
+//                 ((*))         ((*))
+//
+//                       Wifi LAN
+//
+//                        ((*))
+//                          |
+//                     +--------+
+//                     |  wifi  |
+//                     +--------+
+//                     | access |
+//                     |  point |
+//                     +--------+
 //
 #include <iostream>
 #include <fstream>
 
 #include "ns3/core-module.h"
 #include "ns3/network-module.h"
-#include "ns3/csma-module.h"
+#include "ns3/mobility-module.h"
+#include "ns3/wifi-module.h"
 #include "ns3/tap-bridge-module.h"
+
+
+#include "ns3/ocb-wifi-mac.h"
+#include "ns3/wifi-80211p-helper.h"
+#include "ns3/wave-mac-helper.h"
 
 using namespace ns3;
 
-NS_LOG_COMPONENT_DEFINE ("TapCsmaVirtualMachineExample");
+NS_LOG_COMPONENT_DEFINE ("TapWifiVirtualMachineExample");
 
 int 
 main (int argc, char *argv[])
 {
   CommandLine cmd (__FILE__);
   cmd.Parse (argc, argv);
+
+  std::string phyMode ("OfdmRate6MbpsBW10MHz"); // for wave configuration 
 
   //
   // We are interacting with the outside, real, world.  This means we have to 
@@ -93,35 +109,77 @@ main (int argc, char *argv[])
   nodes.Create (2);
 
   //
-  // Use a CsmaHelper to get a CSMA channel created, and the needed net 
-  // devices installed on both of the nodes.  The data rate and delay for the
-  // channel can be set through the command-line parser.  For example,
+  // We're going to use 802.11 A so set up a wifi helper to reflect that.
   //
-  // ./waf --run "tap=csma-virtual-machine --ns3::CsmaChannel::DataRate=10000000"
+  WifiHelper wifi;
+  wifi.SetStandard (WIFI_STANDARD_80211a);
+  wifi.SetRemoteStationManager ("ns3::ConstantRateWifiManager", "DataMode", StringValue ("OfdmRate54Mbps"));
+
   //
-  CsmaHelper csma;
-  NetDeviceContainer devices = csma.Install (nodes);
+  // No reason for pesky access points, so we'll use an ad-hoc network.
+  //
+  WifiMacHelper wifiMac;
+  wifiMac.SetType ("ns3::AdhocWifiMac");
+
+  //
+  // Configure the physical layer.
+  //
+  YansWifiChannelHelper wifiChannel = YansWifiChannelHelper::Default ();
+  YansWifiPhyHelper wifiPhy;
+  wifiPhy.SetChannel (wifiChannel.Create ());
+
+  // configure WAVE 
+  NqosWaveMacHelper wifi80211pMac = NqosWaveMacHelper::Default ();
+  Wifi80211pHelper wifi80211p = Wifi80211pHelper::Default ();
+
+  wifi80211p.SetRemoteStationManager ("ns3::ConstantRateWifiManager",
+                                      "DataMode",StringValue (phyMode),
+                                      "ControlMode",StringValue (phyMode));
+  //
+  // Install the wireless devices onto our ghost nodes.
+  //
+  NetDeviceContainer devices = wifi.Install (wifiPhy, wifiMac, nodes);
+  NetDeviceContainer devices_1 = wifi80211p.Install (wifiPhy, wifi80211pMac, nodes);
+  // NetDeviceContainer devices_1 = wifi.Install (wifiPhy, wifiMac, nodes);
+
+  //
+  // We need location information since we are talking about wifi, so add a
+  // constant position to the ghost nodes.
+  //
+  MobilityHelper mobility;
+  Ptr<ListPositionAllocator> positionAlloc = CreateObject<ListPositionAllocator> ();
+  positionAlloc->Add (Vector (0.0, 0.0, 0.0));
+  positionAlloc->Add (Vector (5.0, 0.0, 0.0));
+  mobility.SetPositionAllocator (positionAlloc);
+  mobility.SetMobilityModel ("ns3::ConstantPositionMobilityModel");
+  mobility.Install (nodes);
 
   //
   // Use the TapBridgeHelper to connect to the pre-configured tap devices for 
-  // the left side.  We go with "UseBridge" mode since the CSMA devices support
-  // promiscuous mode and can therefore make it appear that the bridge is 
-  // extended into ns-3.  The install method essentially bridges the specified
-  // tap to the specified CSMA device.
+  // the left side.  We go with "UseLocal" mode since the wifi devices do not
+  // support promiscuous mode (because of their natures0.  This is a special
+  // case mode that allows us to extend a linux bridge into ns-3 IFF we will
+  // only see traffic from one other device on that bridge.  That is the case
+  // for this configuration.
   //
   TapBridgeHelper tapBridge;
-  tapBridge.SetAttribute ("Mode", StringValue ("UseBridge"));
+  tapBridge.SetAttribute ("Mode", StringValue ("UseLocal"));
   tapBridge.SetAttribute ("DeviceName", StringValue ("tap-left"));
   tapBridge.Install (nodes.Get (0), devices.Get (0));
-  
+  tapBridge.SetAttribute ("DeviceName", StringValue ("tap-left-1"));
+  tapBridge.Install (nodes.Get (0), devices_1.Get (0));
 
   //
-  // Connect the right side tap to the right side CSMA device on the right-side
+  // Connect the right side tap to the right side wifi device on the right-side
   // ghost node.
   //
   tapBridge.SetAttribute ("DeviceName", StringValue ("tap-right"));
   tapBridge.Install (nodes.Get (1), devices.Get (1));
+  tapBridge.SetAttribute ("DeviceName", StringValue ("tap-right-1"));
+  tapBridge.Install (nodes.Get (1), devices_1.Get (1));
 
+  // ENABLE PCAP 
+  wifiPhy.EnablePcapAll("mp-wifi-wave",true);
   //
   // Run the simulation for ten minutes to give the user time to play around
   //

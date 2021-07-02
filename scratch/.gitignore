@@ -1,5 +1,13 @@
 # Ignore everything on scratch by default, except the provided examples
-/*
+
 !.gitignore
 !subdir/
 !scratch-simulator.cc
+!mp-lxc-left.conf
+!mp-lxc-right.conf
+!virtual-network-setup.sh
+!virtual-network-teardown.sh
+!mp-tap-csma-virtual-machine.cc
+!mp-tap-wifi-virtual-machine.cc
+!lxc-annotations.txt
+!ns3-code-snipets.txt
