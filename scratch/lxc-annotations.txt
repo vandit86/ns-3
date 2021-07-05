@@ -43,4 +43,10 @@ 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
 
 
 
-//
+
+// lte 
+rtt min/avg/max/mdev = 19.032/30.070/102.082/17.895 ms
+
+// nr 
+rtt min/avg/max/mdev = 15.133/18.623/32.996/3.696 ms
+
