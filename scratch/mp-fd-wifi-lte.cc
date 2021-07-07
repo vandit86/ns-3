@@ -217,6 +217,23 @@ main (int argc, char *argv[])
   inet.Install (nodeAP);
   inet.Install (nodes); 
 
+
+  // ****************************************************************************************************************
+  //                                            MOBILITY MODEL
+  // ****************************************************************************************************************
+  Ptr<ListPositionAllocator> positionAlloc = CreateObject<ListPositionAllocator> ();
+  positionAlloc->Add (Vector (0, 0, 0));    // pos of left
+  positionAlloc->Add (Vector (5, 0, 5));    // pos of AP
+  positionAlloc->Add (Vector (25, 0, 0));   // pos of right
+  positionAlloc->Add (Vector (30, 0, 10));   // pos of gNodeB
+
+  mobility.SetPositionAllocator (positionAlloc);
+  mobility.SetMobilityModel ("ns3::ConstantPositionMobilityModel");
+  mobility.Install (nodes.Get (0));
+  mobility.Install (nodeAP.Get (0));
+  mobility.Install (nodes.Get(1));
+  mobility.Install (enbNode.Get(0));
+
   // ****************************************************************************************************************
   //                                  Configure PATH 1: WI-FI and CSMA 
   // ****************************************************************************************************************
@@ -438,22 +455,7 @@ main (int argc, char *argv[])
 
   // ADD lxc mp-left address to allow "ping" through EPC-PGW node
   addBackAddress (pgw, ueLteDevs.Get (0), Ipv4Address ("11.0.0.2"));
-  
-  // ****************************************
-  // set possition and mobility model
-  // ****************************************
-  Ptr<ListPositionAllocator> positionAlloc = CreateObject<ListPositionAllocator> ();
-  positionAlloc->Add (Vector (0, 0, 0));    // pos of left
-  positionAlloc->Add (Vector (5, 0, 0));    // pos of AP
-  positionAlloc->Add (Vector (25, 0, 0));   // pos of right
-  positionAlloc->Add (Vector (30, 0, 0));   // pos of eNodeB
 
-  mobility.SetPositionAllocator (positionAlloc);
-  mobility.SetMobilityModel ("ns3::ConstantPositionMobilityModel");
-  mobility.Install (nodes.Get (0));
-  mobility.Install (nodeAP.Get (0));
-  mobility.Install (nodes.Get(1));
-  mobility.Install (enbNode.Get(0));
 
   // ****************************************************************************************************************
   //                        Configure APPLICATIONS 

@@ -30,9 +30,13 @@
 #include "ns3/epc-helper.h"
 #include "ns3/lte-module.h"
 #include "ns3/config-store.h"
+#include "ns3/applications-module.h"
 
 #include "ns3/nr-module.h"   /* LENA 5G NR module */
 #include "ns3/antenna-module.h"
+
+#include "ns3/flow-monitor-helper.h"
+#include "ns3/flow-monitor-module.h"
 
 #include <fcntl.h>  /* O_RDWR */
 #include <string.h> /* memset(), memcpy() */
@@ -97,12 +101,12 @@ int tun_open( std::string dev)
 
 }
 
-// TODO: remove this function 
-static void
-PingRtt (std::string context, Time rtt)
-{
-  NS_LOG_UNCOND ("Received Response with RTT = " << rtt);
-}
+// // TODO: remove this function 
+// static void
+// PingRtt (std::string context, Time rtt)
+// {
+//   NS_LOG_UNCOND ("Received Response with RTT = " << rtt);
+// }
 
 /**
    * Set the address of a previously added UE
@@ -130,6 +134,44 @@ addBackAddress (Ptr<Node> pgw, Ptr<NetDevice> ueLteNetDev, Ipv4Address addr)
   pgwApp->SetUeAddress (imsi, addr);
 }
 
+
+/**  
+ * \brief Used to print information of Flow monitor every second
+*/
+void
+ThroughputMonitor (FlowMonitorHelper *fmhelper, Ptr<FlowMonitor> flowMon)
+{
+  flowMon->CheckForLostPackets ();
+  std::map<FlowId, FlowMonitor::FlowStats> flowStats = flowMon->GetFlowStats ();
+  Ptr<Ipv4FlowClassifier> classing = DynamicCast<Ipv4FlowClassifier> (fmhelper->GetClassifier ());
+  for (std::map<FlowId, FlowMonitor::FlowStats>::const_iterator stats = flowStats.begin ();
+       stats != flowStats.end (); ++stats)
+    {
+      Ipv4FlowClassifier::FiveTuple fiveTuple = classing->FindFlow (stats->first);
+      std::cout << "Flow ID                 : " << stats->first << " ; " << fiveTuple.sourceAddress
+                << " -----> " << fiveTuple.destinationAddress << std::endl;
+      std::cout << "Tx Packets = " << stats->second.txPackets << std::endl;
+      std::cout << "Rx Packets = " << stats->second.rxPackets << std::endl;
+      std::cout << "Duration                : "
+                << stats->second.timeLastRxPacket.GetSeconds () -
+                       stats->second.timeFirstTxPacket.GetSeconds ()
+                << std::endl;
+      std::cout << "Last Received Packet    : " << stats->second.timeLastRxPacket.GetSeconds ()
+                << " Seconds" << std::endl;
+      std::cout << "Throughput: "
+                << stats->second.rxBytes * 8.0 /
+                       (stats->second.timeLastRxPacket.GetSeconds () -
+                        stats->second.timeFirstTxPacket.GetSeconds ()) /
+                       1024 / 1024
+                << " Mbps" << std::endl;
+      std::cout << "---------------------------------------------------------------------------"
+                << std::endl;
+    }
+
+  // Rescheduling the next call to this function to print throughput
+  Simulator::Schedule (Seconds (1), &ThroughputMonitor, fmhelper, flowMon);
+}
+
 // ****************************************************************************************************************
 // ****************************************************************************************************************
 //                                      MAIN
@@ -140,7 +182,7 @@ main (int argc, char *argv[])
 {
   NS_LOG_INFO ("Ping Emulation Example with TAP");
 
-  std::string remote ("14.0.0.2"); 
+  std::string remote ("17.0.0.2"); 
   std::string mask ("255.0.0.0");
   std::string pi ("no");
   
@@ -149,7 +191,7 @@ main (int argc, char *argv[])
   std::string tap_l1 ("tap-left-1");
   std::string tap_r ("tap-right");
   std::string tap_r1 ("tap-right-1");
-  uint64_t path2delay = 1;            // delay between AP and remote host [ms]
+  uint64_t path2delay = 1000;            // delay between AP and remote host [ns]
   double path2err = 0.0;            // packet error rate on path 2 
   double simTime = 60;                // sim time, 1 min by default 
   //
@@ -161,7 +203,7 @@ main (int argc, char *argv[])
   cmd.AddValue ("tapMask", "Network mask for configure the TAP device (dotted decimal only please)", mask);
   cmd.AddValue ("modePi", "If 'yes' a PI header will be added to the traffic traversing the device(flag IFF_NOPI will be unset).", pi);
    cmd.AddValue("simTime", "Total duration of the simulation [s])", simTime);
-  cmd.AddValue("path2delay", "delay between AP and remote host on second path [ms]", path2delay);
+  cmd.AddValue("path2delay", "delay between AP and remote host on second path [ns]", path2delay);
   cmd.AddValue("path2err", "packet error rate between AP and remote host on second path [ms]", path2err);
   cmd.Parse (argc, argv);
 
@@ -169,6 +211,7 @@ main (int argc, char *argv[])
   Ipv4Address remoteIp (remote.c_str ());
   Ipv4Mask tapMask (mask.c_str ());
 
+  // 
   GlobalValue::Bind ("SimulatorImplementationType", StringValue ("ns3::RealtimeSimulatorImpl"));
   GlobalValue::Bind ("ChecksumEnabled", BooleanValue (true));
 
@@ -226,9 +269,9 @@ main (int argc, char *argv[])
   // ****************************************************************************************************************
   Ptr<ListPositionAllocator> positionAlloc = CreateObject<ListPositionAllocator> ();
   positionAlloc->Add (Vector (0, 0, 0));    // pos of left
-  positionAlloc->Add (Vector (5, 0, 0));    // pos of AP
+  positionAlloc->Add (Vector (5, 0, 5));    // pos of AP
   positionAlloc->Add (Vector (25, 0, 0));   // pos of right
-  positionAlloc->Add (Vector (30, 0, 0));   // pos of eNodeB
+  positionAlloc->Add (Vector (30, 0, 10));   // pos of gNodeB
 
   mobility.SetPositionAllocator (positionAlloc);
   mobility.SetMobilityModel ("ns3::ConstantPositionMobilityModel");
@@ -256,8 +299,8 @@ main (int argc, char *argv[])
                                 "ControlMode", StringValue ("OfdmRate24Mbps"));
 
   // configure CSMA AP <--> REMOTE 
-  csma.SetChannelAttribute ("DataRate", StringValue ("100Mbps"));
-  csma.SetChannelAttribute ("Delay", TimeValue (MilliSeconds (path2delay)));
+  csma.SetChannelAttribute ("DataRate", StringValue ("100Gbps"));
+  csma.SetChannelAttribute ("Delay", TimeValue (NanoSeconds (path2delay)));
 
   // Install devices on nodes from path #1
   NetDeviceContainer dev_l_ap = wifi.Install (wifiPhy, wifiMac, nodes_l_ap);
@@ -286,11 +329,9 @@ main (int argc, char *argv[])
   uint16_t numerologyBwp1 = 0;
   //uint32_t udpPacketSize = 1000;
   double centralFrequencyBand1 = 28e9;
-  double bandwidthBand1 = 100e6;
+  double bandwidthBand1 = 20e6;
   int64_t randomStream = 1;
 
-
-  // TODO:: change to LteHelper lteHelper instead of CreateObject and move to up
 
   Ptr<NrPointToPointEpcHelper> epcHelper = CreateObject<NrPointToPointEpcHelper> ();
   Ptr<IdealBeamformingHelper> idealBeamformingHelper = CreateObject<IdealBeamformingHelper> ();
@@ -369,8 +410,8 @@ main (int argc, char *argv[])
   // Get the pgw node to install the csma device
   Ptr<Node> pgw = epcHelper->GetPgwNode ();
   // Link: PGW <---> Remote node through CSMA 
-  csma.SetChannelAttribute ("DataRate", DataRateValue (DataRate ("100Mb/s"))); 
-  csma.SetChannelAttribute ("Delay", TimeValue (MilliSeconds (1)));
+  csma.SetChannelAttribute ("DataRate", DataRateValue (DataRate ("100Gb/s"))); 
+  csma.SetChannelAttribute ("Delay", TimeValue (NanoSeconds (1000)));
   NodeContainer nodes_r_pgw (nodes.Get (1), pgw);
   NetDeviceContainer dev_r_pgw = csma.Install (nodes_r_pgw);
 
@@ -478,6 +519,8 @@ main (int argc, char *argv[])
   // add route to right lxc through wifi
   ueStaticRouting->AddNetworkRouteTo (Ipv4Address ("14.0.0.0"), Ipv4Mask ("255.0.0.0"),
                                       Ipv4Address ("16.0.0.1"), ifce_l_wifi.Get (0).second);
+  ueStaticRouting->AddNetworkRouteTo (Ipv4Address ("17.0.0.0"), Ipv4Mask ("255.0.0.0"),
+                                      Ipv4Address ("16.0.0.1"), ifce_l_wifi.Get (0).second);
 
   // ********************************
   // routing on right node (Remote)
@@ -520,29 +563,63 @@ main (int argc, char *argv[])
   // of a hassle and since there is no law that says we cannot mix the
   // helper API with the low level API, let's just use the helper.
   //
-  NS_LOG_INFO ("Create V4Ping Appliation");
-  Ptr<V4Ping> app = CreateObject<V4Ping> ();
-  app->SetAttribute ("Remote", Ipv4AddressValue (remoteIp));
-  app->SetAttribute ("Verbose", BooleanValue (true));
-  nodes.Get(0)->AddApplication (app);
-  app->SetStartTime (Seconds (1.0));
-  app->SetStopTime (Seconds (simTime-1));
+
+  std::cout << "Remote ip : " << remoteIp << std::endl; 
+  std::cout<< "Create  Appliation" << std::endl;
+  Ptr<V4Ping> pingApp1 = CreateObject<V4Ping> ();
+  pingApp1->SetAttribute ("Remote", Ipv4AddressValue (remoteIp));
+  pingApp1->SetAttribute ("Verbose", BooleanValue (true));
+  pingApp1->SetStartTime (Seconds (1.0));
+  pingApp1->SetStopTime (Seconds (simTime-1));
   
-  //
+  Ptr<V4Ping> pingApp2 = CreateObject<V4Ping> ();
+  pingApp2->SetAttribute ("Remote", Ipv4AddressValue (Ipv4Address("11.0.0.2")));
+  pingApp2->SetAttribute ("Verbose", BooleanValue (true));
+  pingApp2->SetStartTime (Seconds (1.1));
+  pingApp2->SetStopTime (Seconds (simTime-1));
+  
+  nodes.Get(0)->AddApplication (pingApp1);
+  nodes.Get(0)->AddApplication (pingApp2);
+
   // Give the application a name.  This makes life much easier when constructing
   // config paths.
-  //
-  Names::Add ("app", app);
+  // Names::Add ("app", app);
 
-  //
   // Hook a trace to print something when the response comes back.
-  //
-  Config::Connect ("/Names/app/Rtt", MakeCallback (&PingRtt));
+  // Config::Connect ("/Names/app/Rtt", MakeCallback (&PingRtt));
 
   wifiPhy.EnablePcapAll ("mp-wifi", true);
   csma.EnablePcapAll("mp-csma", true);
-  fdNet.EnablePcapAll("mp-fd",true);  
+  fdNet.EnablePcapAll("mp-fd",true);
 
+  // /**
+  //  * On/off application 
+  //   */
+  // // Create the OnOff application to send UDP datagrams of size
+  // uint32_t packetSize = 1000;
+  // uint16_t port = 9;   // Discard port (RFC 863)
+  // OnOffHelper onoff ("ns3::TcpSocketFactory", 
+  //                    Address (InetSocketAddress (remoteIp, port)));
+  // onoff.SetConstantRate (DataRate ("100Mb/s"), packetSize); 
+  // ApplicationContainer apps = onoff.Install (nodes.Get (0));
+  // apps.Start (Seconds (1.0));
+  // apps.Stop (Seconds (simTime/2));
+
+  // // Create a packet sink to receive these packets
+  // PacketSinkHelper sink ("ns3::TcpSocketFactory",
+  //                        Address (InetSocketAddress (Ipv4Address::GetAny (), port)));
+  // apps = sink.Install (nodes.Get (1));
+  // apps.Start (Seconds (1.0));
+  // //apps.Stop (Seconds (10.0));
+
+  // // Install Flow monitor  
+  // Ptr<FlowMonitor> flowMonitor;
+  // FlowMonitorHelper flowHelper;
+  // flowMonitor = flowHelper.Install(nodes); // monitor on left node 
+  // //flowMonitor = flowHelper.Install(NodeContainer(nodes.Get(1), nodeAP.Get(0))); // monitor on left node 
+
+  // // scheduling throughput to be printed every seconds
+  // ThroughputMonitor (&flowHelper, flowMonitor);
 
   // ********************************************************
   // Debug: Testing that proper IP addresses are configured
