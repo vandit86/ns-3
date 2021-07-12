@@ -145,7 +145,7 @@ main (int argc, char *argv[])
   std::string tap_l1 ("tap-left-1");
   std::string tap_r ("tap-right");
   std::string tap_r1 ("tap-right-1");
-  uint64_t path2delay = 1;            // delay between AP and remote host [ms]
+  uint64_t path2delay = 1000;            // delay between AP and remote host [ns]
   double path2err = 0.0;            // packet error rate on path 2 
   double simTime = 60;                // sim time, 1 min by default 
   //
@@ -158,7 +158,7 @@ main (int argc, char *argv[])
   cmd.AddValue ("modePi", "If 'yes' a PI header will be added to the traffic traversing the device(flag IFF_NOPI will be unset).", pi);
    cmd.AddValue("simTime", "Total duration of the simulation [s])", simTime);
   cmd.AddValue("path2delay", "delay between AP and remote host on second path [ms]", path2delay);
-  cmd.AddValue("path2err", "packet error rate between AP and remote host on second path [ms]", path2err);
+  cmd.AddValue("path2err", "packet error rate between AP and remote host on second path", path2err);
   cmd.Parse (argc, argv);
 
   // TODO:: remove or change 
@@ -254,7 +254,7 @@ main (int argc, char *argv[])
 
   // configure CSMA AP <--> REMOTE 
   csma.SetChannelAttribute ("DataRate", StringValue ("100Mbps"));
-  csma.SetChannelAttribute ("Delay", TimeValue (MilliSeconds (path2delay)));
+  csma.SetChannelAttribute ("Delay", TimeValue (NanoSeconds (path2delay)));
 
   // Install devices on nodes from path #1
   NetDeviceContainer dev_l_ap = wifi.Install (wifiPhy, wifiMac, nodes_l_ap);
@@ -487,12 +487,26 @@ main (int argc, char *argv[])
 
   wifiPhy.EnablePcapAll ("mp-wifi", true);
   csma.EnablePcapAll("mp-csma", true);
-  fdNet.EnablePcapAll("mp-fd",true);  
-
+  fdNet.EnablePcapAll("mp-fd",true);
 
   // ********************************************************
   // Debug: Testing that proper IP addresses are configured
   // ********************************************************
+  
+  // print routing table of PGW
+  Ptr<ns3::OutputStreamWrapper> strwrp = Create<OutputStreamWrapper> (&std::cout);
+  std::cout << "routing table of PGW" << std::endl;
+  pgwStaticRouting->PrintRoutingTable (strwrp);
+  std::cout << "routing table of AP (wifi)" << std::endl;
+  apStaticRouting->PrintRoutingTable (strwrp);
+  std::cout << "routing table of UE" << std::endl;
+  ueStaticRouting->PrintRoutingTable (strwrp);
+  std::cout << "routing table of Remote " << std::endl;
+  rightStaticRouting->PrintRoutingTable (strwrp);
+
+  // print routing table of UE
+
+
   // Ptr<Node> ueNodeZero = nodes.Get (0);
   // Ipv4Address gateway = epcHelper->GetUeDefaultGatewayAddress ();
   // Ptr<Ipv4> ipv4_ue = ueNodeZero->GetObject<Ipv4> ();
