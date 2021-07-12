@@ -136,7 +136,7 @@ main (int argc, char *argv[])
 {
   NS_LOG_INFO ("Ping Emulation Example with TAP");
 
-  std::string remote ("14.0.0.2"); 
+  std::string remote ("13.0.0.2"); 
   std::string mask ("255.0.0.0");
   std::string pi ("no");
   
@@ -253,7 +253,7 @@ main (int argc, char *argv[])
                                 "ControlMode", StringValue ("OfdmRate24Mbps"));
 
   // configure CSMA AP <--> REMOTE 
-  csma.SetChannelAttribute ("DataRate", StringValue ("100Mbps"));
+  csma.SetChannelAttribute ("DataRate", StringValue ("10Mbps"));
   csma.SetChannelAttribute ("Delay", TimeValue (NanoSeconds (path2delay)));
 
   // Install devices on nodes from path #1
@@ -316,7 +316,7 @@ main (int argc, char *argv[])
   lteHelper->Attach (ueLteDevs.Get(0), enbLteDevs.Get (0));
 
   // Link: PGW <---> Remote node through CSMA 
-  csma.SetChannelAttribute ("DataRate", DataRateValue (DataRate ("100Mb/s"))); 
+  csma.SetChannelAttribute ("DataRate", DataRateValue (DataRate ("10Gb/s"))); 
   csma.SetChannelAttribute ("Delay", TimeValue (NanoSeconds (1000)));
   NodeContainer nodes_r_pgw (nodes.Get (1), pgw);
   NetDeviceContainer dev_r_pgw = csma.Install (nodes_r_pgw);
@@ -504,6 +504,18 @@ main (int argc, char *argv[])
   // ********************************************************
   // Debug: Testing that proper IP addresses are configured
   // ********************************************************
+
+   // print routing table of PGW
+  Ptr<ns3::OutputStreamWrapper> strwrp = Create<OutputStreamWrapper> (&std::cout);
+  std::cout << "routing table of PGW" << std::endl;
+  pgwStaticRouting->PrintRoutingTable (strwrp);
+  std::cout << "routing table of AP (wifi)" << std::endl;
+  apStaticRouting->PrintRoutingTable (strwrp);
+  std::cout << "routing table of UE" << std::endl;
+  ueStaticRouting->PrintRoutingTable (strwrp);
+  std::cout << "routing table of Remote " << std::endl;
+  rightStaticRouting->PrintRoutingTable (strwrp);
+
   // Ptr<Node> ueNodeZero = nodes.Get (0);
   // Ipv4Address gateway = epcHelper->GetUeDefaultGatewayAddress ();
   // Ptr<Ipv4> ipv4_ue = ueNodeZero->GetObject<Ipv4> ();

@@ -37,6 +37,8 @@
 #include "ns3/flow-monitor-helper.h"
 #include "ns3/flow-monitor-module.h"
 #include "ns3/netanim-module.h"
+#include "ns3/internet-apps-module.h"
+
 
 // wifi 
 #include "ns3/wifi-module.h"
@@ -111,69 +113,32 @@ CsmaPhyTxDrop (std::string context, Ptr<const Packet> p)
   std::cout << p->GetUid() << std::endl << " at " << Simulator::Now(); 
 }
 
+// ****************************************************************************************************************
+// ****************************************************************************************************************
+//                                      MAIN
+// ****************************************************************************************************************
+// ****************************************************************************************************************
+
 int
 main (int argc, char *argv[])
 {
-  LogComponentEnable("EpcFirstExample",LOG_LEVEL_INFO);
-  LogLevel logLevel = (LogLevel) ( LOG_LEVEL_ALL);
-  //LogComponentEnable ("EpcPgwApplication", logLevel);
-  LogComponentEnable ("TapBridge", logLevel);
-  
-  // LogLevel logLevel = (LogLevel) (LOG_PREFIX_ALL | LOG_LEVEL_ALL);
-  // LogComponentEnable ("LteHelper", logLevel);
-  // LogComponentEnable ("EpcHelper", logLevel);
-  // LogComponentEnable ("EpcEnbApplication", logLevel);
-  // LogComponentEnable ("LteEnbRrc", logLevel);
-  // LogComponentEnable ("LteEnbNetDevice", logLevel);
-  // LogComponentEnable ("LteUeRrc", logLevel);
-  // LogComponentEnable ("LteUeNetDevice", logLevel);
-  // LogComponentEnable ("EpcX2", logLevel);
-  // LogComponentEnable ("EpcSgwPgwApplication", logLevel);
-
-  uint16_t numberOfNodes = 1;
-  double simTime = 10;
-  double distance = 60.0;
-//  double interPacketInterval = 100;
+  // uint16_t numberOfNodes = 1;
+  double simTime = 60;    // sec
+  double distance = 60.0; // m
   bool useCa = false;
-  uint64_t path2delay = 1; // delay between AP and remote host 
+  uint64_t path2delay = 1000; // delay between AP and remote host 
 
   // Command line arguments
   CommandLine cmd;
-  cmd.AddValue("numberOfNodes", "Number of eNodeBs + UE pairs", numberOfNodes);
   cmd.AddValue("simTime", "Total duration of the simulation [s])", simTime);
   cmd.AddValue("distance", "Distance between eNBs [m]", distance);
   cmd.AddValue("useCa", "Whether to use carrier aggregation.", useCa);
-  cmd.AddValue("path2delay", "delay between AP and remote host on second path [ms]", path2delay);
+  cmd.AddValue("path2delay", "delay between AP and remote host on second path [ns]", path2delay);
   cmd.Parse(argc, argv);
 
-  // Default LTE configuration
-  Config::SetDefault ("ns3::LteSpectrumPhy::CtrlErrorModelEnabled", BooleanValue (false));
-  Config::SetDefault ("ns3::LteSpectrumPhy::DataErrorModelEnabled", BooleanValue (false));
-  Config::SetDefault ("ns3::RrFfMacScheduler::HarqEnabled", BooleanValue (false));
-  Config::SetDefault ("ns3::LteHelper::PathlossModel",
-                      StringValue ("ns3::FriisSpectrumPropagationLossModel"));
-  Config::SetDefault ("ns3::LteEnbNetDevice::UlBandwidth", UintegerValue (100)); //20MHz bandwidth
-  Config::SetDefault ("ns3::LteEnbNetDevice::DlBandwidth", UintegerValue (100)); //20MHz bandwidth
-  Config::SetDefault ("ns3::LteAmc::AmcModel", EnumValue (LteAmc::PiroEW2010));
-  // Config::SetDefault ("ns3::RealtimeSimulatorImpl::SynchronizationMode"=StringValue("HardLimit"));
-  //Config::SetDefault ("ns3::LteAmc::Ber", DoubleValue (0.00005));
-
-  SeedManager::SetSeed ((uint32_t) (time (NULL)));
-
-  // Uncomment to enable PCAP tracing
-  // Config::SetDefault ("ns3::PointToPointEpcHelper::S1uLinkEnablePcap", BooleanValue (true));
-
-  if (useCa)
-    {
-      Config::SetDefault ("ns3::LteHelper::UseCa", BooleanValue (useCa));
-      Config::SetDefault ("ns3::LteHelper::NumberOfComponentCarriers", UintegerValue (2));
-      Config::SetDefault ("ns3::LteHelper::EnbComponentCarrierManager",
-                          StringValue ("ns3::RrComponentCarrierManager"));
-      Config::SetDefault ("ns3::ComponentCarrier::UlBandwidth", UintegerValue (100));
-      Config::SetDefault ("ns3::ComponentCarrier::DlBandwidth", UintegerValue (100));
-      Config::SetDefault ("ns3::ComponentCarrier::PrimaryCarrier", BooleanValue (true));
-    }
-
+   // ****************************************
+  // Global configurations  
+  // ****************************************
   //
   // We are interacting with the outside, real, world.  This means we have to
   // interact in real-time and therefore means we have to use the real-time
@@ -181,192 +146,181 @@ main (int argc, char *argv[])
   //
   GlobalValue::Bind ("SimulatorImplementationType", StringValue ("ns3::RealtimeSimulatorImpl"));
   GlobalValue::Bind ("ChecksumEnabled", BooleanValue (true));
-
-  // ********************************************************
-  // Configuring LTE
-  // ********************************************************
-
-  Ptr<LteHelper> lteHelper = CreateObject<LteHelper> ();
-  Ptr<PointToPointEpcHelper> epcHelper = CreateObject<PointToPointEpcHelper> ();
-  // epcHelper
-  lteHelper->SetEpcHelper (epcHelper);
+  // Config::SetDefault ("ns3::RealtimeSimulatorImpl::SynchronizationMode"=StringValue("HardLimit"));
 
   // config output
   Config::SetDefault ("ns3::ConfigStore::Filename", StringValue ("output-attributes.txt"));
   Config::SetDefault ("ns3::ConfigStore::FileFormat", StringValue ("RawText"));
   Config::SetDefault ("ns3::ConfigStore::Mode", StringValue ("Save"));
-  ConfigStore outputConfig2;
-  outputConfig2.ConfigureDefaults ();
-  outputConfig2.ConfigureAttributes ();
 
-  // parse again so you can override default values from the command line
-  cmd.Parse (argc, argv);
-
-  // Defining UE and eNB nodes
-  NodeContainer ueNodes;
-  NodeContainer enbNodes;
-  enbNodes.Create (numberOfNodes);
-  ueNodes.Create (numberOfNodes);
 
   // Create ghost nodes that will host the TapBridge and connect to the base system
-  NodeContainer ghost_nodes;
-  ghost_nodes.Create (2);
+  NodeContainer nodes;
+  nodes.Create (2);
+
+  NodeContainer nodeAP;         // create one wifi AP node
+  nodeAP.Create(1);                   
+  
+  NodeContainer ueNode;         // create one UE node
+  ueNode.Create(1);                   
+
+  NodeContainer enbNode;       // create one eNB node     
+  enbNode.Create (1);
+
+  // ****************************************
+  // Helpers used in simulation 
+  // ****************************************
+  MobilityHelper mobility;                      // mobility helper 
+  InternetStackHelper inet;                     // internet stack helper 
+  YansWifiChannelHelper wifiChannel;            // Yans Wifi Channel Helper
+  YansWifiPhyHelper wifiPhy;                    // Yans Wifi Phy Helper
+  WifiMacHelper wifiMac;                        // Wifi Mac Helper
+  WifiHelper wifi;                              // Wifi Helper
+  CsmaHelper csma;                              // Csma Helper
+  Ipv4AddressHelper ipv4h;                      // Ipv4 Address Helper
+  Ipv4StaticRoutingHelper ipv4RoutingHelper;    // Ipv4 Static Routing Helper
+
+  // ****************************************
+  // Add a default internet stack to the node (ARP, IPv4, ICMP, UDP and TCP).
+  // ****************************************
+  inet.Install (nodeAP);
+  inet.Install (ueNode);
+
+  // ****************************************************************************************************************
+  //                                            MOBILITY MODEL
+  // ****************************************************************************************************************
+  Ptr<ListPositionAllocator> positionAlloc = CreateObject<ListPositionAllocator> ();
+  positionAlloc->Add (Vector (0, 0, 0)); // pos of left
+  positionAlloc->Add (Vector (5, 0, 5)); // pos of AP
+  positionAlloc->Add (Vector (25, 0, 0)); // pos of right
+  positionAlloc->Add (Vector (distance, 0, 10)); // pos of gNodeB
+
+  mobility.SetPositionAllocator (positionAlloc);
+  mobility.SetMobilityModel ("ns3::ConstantPositionMobilityModel");
+  mobility.Install (nodes.Get (0));
+  mobility.Install (nodeAP.Get (0));
+  mobility.Install (nodes.Get (1));
+  mobility.Install (enbNode.Get (0));
+
+
+// ****************************************************************************************************************
+  //                                  Configure PATH 1: WI-FI and CSMA 
+  // ****************************************************************************************************************
+
+  // create default  wifi  channel 
+  wifiChannel = YansWifiChannelHelper::Default ();
+  wifiPhy.SetPcapDataLinkType (WifiPhyHelper::DLT_IEEE802_11_RADIO);  // allow pcap traces 
+  wifiPhy.SetChannel (wifiChannel.Create ());                         // create channel 
+
+   // Add a mac and Set it to adhoc mode
+  wifiMac.SetType ("ns3::AdhocWifiMac");
+  
+  // wifi helper set params 
+  wifi.SetStandard (WIFI_STANDARD_80211a);
+  wifi.SetRemoteStationManager ("ns3::ConstantRateWifiManager", "DataMode",
+                                StringValue ("OfdmRate54Mbps"), 
+                                "ControlMode", StringValue ("OfdmRate24Mbps"));
+
+ 
+  // dev conteiner of wifi devices starting from left 
+  NodeContainer wifiNodes (nodes.Get(0), nodeAP.Get(0)); 
+  NetDeviceContainer wifiDevices =  wifi.Install (wifiPhy, wifiMac, wifiNodes);
+
+  // Assign adress to AP wifi inface
+  ipv4h.SetBase ("15.0.0.0", "255.0.0.0", "0.0.0.1");
+  Ipv4InterfaceContainer wifiAPinface = ipv4h.Assign (wifiDevices.Get(1)); // #1 inface AP
+
+  // Copnnect AP with right host through csma
+  csma.SetChannelAttribute ("DataRate", DataRateValue (DataRate ("100Mb/s")));
+  csma.SetChannelAttribute ("Delay", TimeValue (NanoSeconds (path2delay)));
+  NodeContainer csma_AP_right_nodes (nodeAP.Get (0), nodes.Get (1));
+  NetDeviceContainer csma_AP_right_devices = csma.Install (csma_AP_right_nodes);
+
+  // Assign adress to AP csma inface
+  ipv4h.SetBase ("14.0.0.0", "255.0.0.0", "0.0.0.1");
+  Ipv4InterfaceContainer csmaAPinface = ipv4h.Assign (csma_AP_right_devices.Get (0)); // #2 inface AP
+
+  // ****************************************************************************************************************
+  //                                  Configure PATH 2: LTE and CSMA
+  // ****************************************************************************************************************
+
+  // LTE defoult config ...
+  {
+    // Default LTE configuration
+    Config::SetDefault ("ns3::LteSpectrumPhy::CtrlErrorModelEnabled", BooleanValue (false));
+    Config::SetDefault ("ns3::LteSpectrumPhy::DataErrorModelEnabled", BooleanValue (false));
+    Config::SetDefault ("ns3::RrFfMacScheduler::HarqEnabled", BooleanValue (false));
+    Config::SetDefault ("ns3::LteHelper::PathlossModel",
+                        StringValue ("ns3::FriisSpectrumPropagationLossModel"));
+    Config::SetDefault ("ns3::LteEnbNetDevice::UlBandwidth", UintegerValue (100)); //20MHz bandwidth
+    Config::SetDefault ("ns3::LteEnbNetDevice::DlBandwidth", UintegerValue (100)); //20MHz bandwidth
+    Config::SetDefault ("ns3::LteAmc::AmcModel", EnumValue (LteAmc::PiroEW2010));
+
+    SeedManager::SetSeed ((uint32_t) (time (NULL)));
+
+    // Uncomment to enable PCAP tracing
+    // Config::SetDefault ("ns3::PointToPointEpcHelper::S1uLinkEnablePcap", BooleanValue (true));
+
+    if (useCa)
+      {
+        Config::SetDefault ("ns3::LteHelper::UseCa", BooleanValue (useCa));
+        Config::SetDefault ("ns3::LteHelper::NumberOfComponentCarriers", UintegerValue (2));
+        Config::SetDefault ("ns3::LteHelper::EnbComponentCarrierManager",
+                            StringValue ("ns3::RrComponentCarrierManager"));
+        Config::SetDefault ("ns3::ComponentCarrier::UlBandwidth", UintegerValue (100));
+        Config::SetDefault ("ns3::ComponentCarrier::DlBandwidth", UintegerValue (100));
+        Config::SetDefault ("ns3::ComponentCarrier::PrimaryCarrier", BooleanValue (true));
+      }
+  }
+  
+  Ptr<LteHelper> lteHelper = CreateObject<LteHelper> ();
+  Ptr<PointToPointEpcHelper> epcHelper = CreateObject<PointToPointEpcHelper> ();
+  lteHelper->SetEpcHelper (epcHelper);
 
   // Get the pgw node to install the csma device
   Ptr<Node> pgw = epcHelper->GetPgwNode ();
 
-  // Install Mobility Model **************************
-  
-  Ptr<ListPositionAllocator> positionAlloc = CreateObject<ListPositionAllocator> ();
-  for (uint16_t i = 0; i < numberOfNodes; i++)
-    {
-      positionAlloc->Add (Vector (distance * i, 0, 0));
-    }
-
-  MobilityHelper mobility;
-  mobility.SetMobilityModel ("ns3::ConstantPositionMobilityModel");
-  mobility.SetPositionAllocator (positionAlloc);
-  mobility.Install (enbNodes);
-  mobility.Install (ueNodes);
-
-  // ****************************************************
-
   // Install LTE Devices to the nodes
-  NetDeviceContainer enbLteDevs = lteHelper->InstallEnbDevice (enbNodes);
-  NetDeviceContainer ueLteDevs = lteHelper->InstallUeDevice (ueNodes);
+  NetDeviceContainer enbLteDevs = lteHelper->InstallEnbDevice (enbNode.Get(0));
+  NetDeviceContainer ueLteDevs = lteHelper->InstallUeDevice (ueNode.Get(0));  // 
 
-  // Install the IP stack on the UEs
-  InternetStackHelper internet;
-  internet.Install (ueNodes);
   Ipv4InterfaceContainer ueIpIface;
-  ueIpIface = epcHelper->AssignUeIpv4Address (NetDeviceContainer (ueLteDevs));
-
-  // // Set the default gateway for the UE using a static routing
-  Ipv4StaticRoutingHelper ipv4RoutingHelper;
-  for (uint32_t u = 0; u < ueNodes.GetN (); ++u)
-    {
-      Ptr<Node> ueNode = ueNodes.Get (u);
-      Ptr<Ipv4StaticRouting> ueStaticRouting = ipv4RoutingHelper.GetStaticRouting (ueNode->GetObject<Ipv4> ());
-      ueStaticRouting->SetDefaultRoute (epcHelper->GetUeDefaultGatewayAddress (), 1);
-    }
+  ueIpIface = epcHelper->AssignUeIpv4Address (NetDeviceContainer (ueLteDevs));  // #1 UE iface
 
   // Attach one UE per eNodeB
-  for (uint16_t i = 0; i < numberOfNodes; i++)
-    {
-      lteHelper->Attach (ueLteDevs.Get (i), enbLteDevs.Get (i));
-      // side effect: the default EPS bearer will be activated
-    }
+  // side effect: the default EPS bearer will be activated
+  lteHelper->Attach (ueLteDevs.Get (0), enbLteDevs.Get (0));
 
   // Setup the left ghost node and hook it to the first UE
-  CsmaHelper csma_left;
-  csma_left.SetChannelAttribute ("DataRate", DataRateValue (DataRate ("100Gb/s"))); // Set high to avoid impact of this link
-  csma_left.SetChannelAttribute ("Delay", TimeValue (NanoSeconds (1)));
-  NodeContainer csma_left_nodes(ghost_nodes.Get(0), ueNodes.Get(0));
-  NetDeviceContainer csma_left_devices = csma_left.Install (csma_left_nodes);
+  csma.SetChannelAttribute ("DataRate", DataRateValue (DataRate ("100Gb/s"))); // Set high to avoid impact of this link
+  csma.SetChannelAttribute ("Delay", TimeValue (NanoSeconds (1)));
+  NodeContainer csma_left_nodes(nodes.Get(0), ueNode.Get(0));
+  NetDeviceContainer csma_left_devices = csma.Install (csma_left_nodes);
 
   // Setup the right ghost node and hook it to the remote node
-  CsmaHelper csma_right;
-  csma_right.SetChannelAttribute (
-      "DataRate", DataRateValue (DataRate ("10Gb/s"))); // Set high to avoid impact of this link
-  csma_right.SetChannelAttribute ("Delay", TimeValue (MilliSeconds (1)));
-  NodeContainer csma_right_nodes (ghost_nodes.Get (1), pgw);
-  NetDeviceContainer csma_right_devices = csma_right.Install (csma_right_nodes);
+  csma.SetChannelAttribute ("DataRate", DataRateValue (DataRate ("10Gb/s"))); // Set high to avoid impact of this link
+  csma.SetChannelAttribute ("Delay", TimeValue (MilliSeconds (1)));
+  NodeContainer csma_right_nodes (nodes.Get (1), pgw);
+  NetDeviceContainer csma_right_devices = csma.Install (csma_right_nodes);
 
   // Configuring the UE and the csma device in the pgw as the default gateways for the external networks
-  Ipv4AddressHelper ipv4h;
   ipv4h.SetBase ("11.0.0.0", "255.0.0.0", "0.0.0.1");
-  Ipv4InterfaceContainer UeIpIfaces = ipv4h.Assign (NetDeviceContainer (csma_left_devices.Get (1)));
+  Ipv4InterfaceContainer UeIpIfaces = ipv4h.Assign (NetDeviceContainer (csma_left_devices.Get (1)));  // #2
 
   ipv4h.SetBase ("13.0.0.0", "255.0.0.0", "0.0.0.1");
   Ipv4InterfaceContainer rNodeIpIfaces =
       ipv4h.Assign (NetDeviceContainer (csma_right_devices.Get (1)));
 
-  // Adding the network behind the UE to the pgw --> hardcoding the IP address of the UE connected to the external network
-  Ptr<Ipv4StaticRouting> pgwStaticRouting =
-      ipv4RoutingHelper.GetStaticRouting (pgw->GetObject<Ipv4> ());
-  pgwStaticRouting->AddNetworkRouteTo (Ipv4Address ("11.0.0.0"), Ipv4Mask ("255.0.0.0"),
-                                       Ipv4Address ("7.0.0.2"), 1);
-  pgwStaticRouting->AddNetworkRouteTo (Ipv4Address ("15.0.0.0"), Ipv4Mask ("255.0.0.0"),
-                                       Ipv4Address ("7.0.0.2"), 1);
-
-  // add route to wifi interface of left node from UE
-  Ptr<Ipv4StaticRouting> ueStaticRouting =
-      ipv4RoutingHelper.GetStaticRouting (ueNodes.Get(0)->GetObject<Ipv4> ());
-  ueStaticRouting->AddNetworkRouteTo (Ipv4Address ("15.0.0.0"), Ipv4Mask ("255.0.0.0"),
-                                      Ipv4Address ("11.0.0.2"), 2);
-
-  // ADD lxc mp-left container address to allow "ping" through EPC-PGW node
+    // ADD lxc mp-left container address to allow "ping" through EPC-PGW node
   addBackAddress (pgw, ueLteDevs.Get (0), Ipv4Address ("11.0.0.2"));
 
-  // ********************************************************
-  // Configuring WiFI path
-  // ********************************************************
-
-  // std::string phyMode ("DsssRate1Mbps");
-  // double rss = -40;  // -dBm 
-
-  NodeContainer wifiAP;
-  wifiAP.Create(1);     // create AP node
-
-  // create default  wifi  channel 
-  YansWifiChannelHelper wifiChannel = YansWifiChannelHelper::Default ();
-  YansWifiPhyHelper wifiPhy;
-  wifiPhy.SetPcapDataLinkType (WifiPhyHelper::DLT_IEEE802_11_RADIO);  
-  wifiPhy.SetChannel (wifiChannel.Create ());
-
-  // Add a mac and Set it to adhoc mode
-  WifiMacHelper wifiMac;
-  wifiMac.SetType ("ns3::AdhocWifiMac");
   
-  // wifi helper 
-  WifiHelper wifi;
-
-  // wifi.SetStandard (WIFI_STANDARD_80211n_5GHZ);
-  //Config::SetDefault ("ns3::LogDistancePropagationLossModel::ReferenceLoss", DoubleValue (40.046));
   
-  wifi.SetStandard (WIFI_STANDARD_80211a);
-  wifi.SetRemoteStationManager ("ns3::ConstantRateWifiManager", "DataMode",
-                                StringValue ("OfdmRate54Mbps"), 
-                                "ControlMode", StringValue ("OfdmRate24Mbps"));
-                                
-  NodeContainer wifiNodes (ghost_nodes.Get(0), wifiAP.Get(0)); 
-
-  // dev conteiner of wifi devices starting from left 
-  NetDeviceContainer wifiDevices =  wifi.Install (wifiPhy, wifiMac, wifiNodes);
-
-  // set possition for the ghost-node
-  Ptr<ListPositionAllocator> positionAllocWifi = CreateObject<ListPositionAllocator> ();
-  positionAllocWifi->Add (Vector (0.0, 0.0, 0.0));
-  positionAllocWifi->Add (Vector (distance/2, 0, 0));
-  mobility.SetPositionAllocator (positionAllocWifi);
-  mobility.SetMobilityModel ("ns3::ConstantPositionMobilityModel");
-  mobility.Install (wifiAP.Get(0));
-  mobility.Install (ghost_nodes.Get(0));
-
-  // install ip stack on wifi AP using pre defined InternetStackHelper;
-  internet.Install (wifiAP);
-
-  // Assign adress to AP wifi inface
-  NS_LOG_INFO ("Assign IP Addresses to AP.");
-  ipv4h.SetBase ("15.0.0.0", "255.0.0.0", "0.0.0.1");
-  Ipv4InterfaceContainer wifiAPinface = ipv4h.Assign (wifiDevices.Get(1));
-
-  // Copnnect AP with right host through csma 10Gb/s and 1 ms delay
-  CsmaHelper csmaHelper;
-  csmaHelper.SetChannelAttribute ("DataRate", DataRateValue (DataRate ("10Gb/s")));
-  csmaHelper.SetChannelAttribute ("Delay", TimeValue (MilliSeconds (path2delay)));
-  NodeContainer csma_AP_right_nodes (wifiAP.Get (0), ghost_nodes.Get (1));
-  NetDeviceContainer csma_AP_right_devices = csmaHelper.Install (csma_AP_right_nodes);
-
-  // Assign adress to AP csma inface
-  ipv4h.SetBase ("14.0.0.0", "255.0.0.0", "0.0.0.1");
-  Ipv4InterfaceContainer csmaAPinface = ipv4h.Assign (csma_AP_right_devices.Get (0));
+  // Config::ConnectFailSafe ("/NodeList/*/DeviceList/*/$ns3::CsmaNetDevice/PhyTxDrop",
+  //                          MakeCallback (&CsmaPhyTxDrop));
   
-  Config::ConnectFailSafe ("/NodeList/*/DeviceList/*/$ns3::CsmaNetDevice/PhyTxDrop",
-                           MakeCallback (&CsmaPhyTxDrop));
-  
-  Config::ConnectFailSafe ("/NodeList/*/DeviceList/*/$ns3::CsmaNetDevice/PhyRxDrop",
-                           MakeCallback (&CsmaPhyTxDrop));
+  // Config::ConnectFailSafe ("/NodeList/*/DeviceList/*/$ns3::CsmaNetDevice/PhyRxDrop",
+  //                          MakeCallback (&CsmaPhyTxDrop));
 
 
   // add route to left lxc
@@ -383,19 +337,48 @@ main (int argc, char *argv[])
   // left containet
   tapBridge.SetAttribute ("Mode", StringValue ("UseLocal"));
   tapBridge.SetAttribute ("DeviceName", StringValue ("tap-left"));
-  tapBridge.Install (ghost_nodes.Get (0), csma_left_devices.Get (0));
+  tapBridge.Install (nodes.Get (0), csma_left_devices.Get (0));
   // right container
   tapBridge.SetAttribute ("Mode", StringValue ("UseLocal"));
   tapBridge.SetAttribute ("DeviceName", StringValue ("tap-right"));
-  tapBridge.Install (ghost_nodes.Get (1), csma_right_devices.Get (0));
+  tapBridge.Install (nodes.Get (1), csma_right_devices.Get (0));
   
   TapBridgeHelper tapBridge1;
   tapBridge1.SetAttribute ("Mode", StringValue ("UseLocal"));
   tapBridge1.SetAttribute ("DeviceName", StringValue ("tap-left-1"));
-  tapBridge1.Install (ghost_nodes.Get (0), wifiDevices.Get (0));
+  tapBridge1.Install (nodes.Get (0), wifiDevices.Get (0));
   tapBridge1.SetAttribute ("DeviceName", StringValue ("tap-right-1"));
-  tapBridge1.Install (ghost_nodes.Get (1), csma_AP_right_devices.Get (1));
+  tapBridge1.Install (nodes.Get (1), csma_AP_right_devices.Get (1));
 
+  
+   // ****************************************************************************************************************
+  //                        Configure ROUTING
+  // ****************************************************************************************************************
+  
+  //  UE routing 
+  // Set the default gateway for the UE using a static routing
+  Ptr<Ipv4StaticRouting> ueStaticRouting =
+      ipv4RoutingHelper.GetStaticRouting (ueNode.Get (0)->GetObject<Ipv4> ());
+  ueStaticRouting->SetDefaultRoute (epcHelper->GetUeDefaultGatewayAddress (), 1);
+
+  // PGW 
+  // Adding the network behind the UE to the pgw --> hardcoding the IP address of the UE connected to the external network
+  Ptr<Ipv4StaticRouting> pgwStaticRouting =
+      ipv4RoutingHelper.GetStaticRouting (pgw->GetObject<Ipv4> ());
+  pgwStaticRouting->AddNetworkRouteTo (Ipv4Address ("11.0.0.0"), Ipv4Mask ("255.0.0.0"),
+                                       Ipv4Address ("7.0.0.2"), 1);
+  // pgwStaticRouting->AddNetworkRouteTo (Ipv4Address ("15.0.0.0"), Ipv4Mask ("255.0.0.0"),
+  //                                      Ipv4Address ("7.0.0.2"), 1);
+
+  // // add route to wifi interface of left node from UE
+  // Ptr<Ipv4StaticRouting> ueStaticRouting =
+  //     ipv4RoutingHelper.GetStaticRouting (ueNode.Get(0)->GetObject<Ipv4> ());
+  // ueStaticRouting->AddNetworkRouteTo (Ipv4Address ("15.0.0.0"), Ipv4Mask ("255.0.0.0"),
+  //                                     Ipv4Address ("11.0.0.2"), 2);
+
+
+  
+  
   // ********************************************************
   // turn off AP csma interface after N sec
   // turn ON AP csma interface after M sec
@@ -413,7 +396,7 @@ main (int argc, char *argv[])
   // ********************************************************
   // Debug: Testing that proper IP addresses are configured
   // ********************************************************
-  Ptr<Node> ueNodeZero = ueNodes.Get (0);
+  Ptr<Node> ueNodeZero = ueNode.Get (0);
   Ipv4Address gateway = epcHelper->GetUeDefaultGatewayAddress ();
   Ptr<Ipv4> ipv4_ue = ueNodeZero->GetObject<Ipv4> ();
   Ipv4Address addr1_ue = ipv4_ue->GetAddress (1, 0).GetLocal ();
@@ -435,7 +418,7 @@ main (int argc, char *argv[])
 
   // LTE connection to ghost nodes
   // csma_right.EnablePcap ("lena-csma-right", csma_right_devices.Get (0), true);
-  csma_right.EnablePcap ("lena-csma-right", csma_AP_right_devices.Get (0), true);
+  csma.EnablePcap ("lena-csma-right", csma_AP_right_devices.Get (0), true);
 
   // csma_left.EnablePcapAll("csma_lte", true);
   // csma_right.EnablePcapAll("csma_right", true);
@@ -444,9 +427,9 @@ main (int argc, char *argv[])
   wifiPhy.EnablePcapAll("mp-wifi-lte",true);
    
   // Flow monitor
-  Ptr<FlowMonitor> flowMonitor;
-  FlowMonitorHelper flowHelper;
-  flowMonitor = flowHelper.InstallAll();
+  // Ptr<FlowMonitor> flowMonitor;
+  // FlowMonitorHelper flowHelper;
+  // flowMonitor = flowHelper.InstallAll();
 
   // scheduling throughput to be printed every 3 seconds
   //ThroughputMonitor (&flowHelper, flowMonitor);
@@ -481,7 +464,7 @@ main (int argc, char *argv[])
 
   Simulator::Destroy();
 
-  flowMonitor->SerializeToXmlFile("mp-flow-monitor.xml", true, true); 
+  //flowMonitor->SerializeToXmlFile("mp-flow-monitor.xml", true, true); 
 
   return 0;
 
