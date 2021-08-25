@@ -32,6 +32,8 @@ TAGS
 .lock-waf_*_build
 .waf*
 
+examples/multipath/
+output-attributes.txt
 build-dir/
 build/
 /.cproject
