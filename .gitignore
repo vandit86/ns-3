@@ -32,7 +32,7 @@ TAGS
 .lock-waf_*_build
 .waf*
 
-examples/multipath/
+#examples/multipath/
 output-attributes.txt
 build-dir/
 build/
