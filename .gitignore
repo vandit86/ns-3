@@ -40,3 +40,6 @@ build/
 /.project
 
 version.cache
+src/traci-applications/examples/ns3-sumo-coupling.xml
+sumo-errors-or-collisions.xml
+.vscode/c_cpp_properties.json
