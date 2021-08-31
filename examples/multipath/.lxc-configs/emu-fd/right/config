@@ -21,7 +21,7 @@ lxc.net.1.veth.pair = vethRight1
 lxc.net.1.ipv4.address = 14.0.0.2/8
 
 # hooks
-#lxc.hook.mount = /var/lib/lxc/mp-right/ifup.sh
+lxc.hook.mount = /var/lib/lxc/right/ifup.sh
 
 # Network configuration
 #lxc.net.0.type = veth
