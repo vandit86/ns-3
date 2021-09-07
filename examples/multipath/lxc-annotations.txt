@@ -37,13 +37,6 @@ CXXFLAGS="-Wno-error"
 --enable-static       Compile NS-3 statically:
 --out=OUT   build dir for the project
 
-
-token git : 
-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
-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
-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 
-
-
 wireshark filter goodput: 
 (tcp.stream == 3 || tcp.stream == 2)  && frame.len==1514
 

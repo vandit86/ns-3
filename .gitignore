@@ -43,3 +43,5 @@ version.cache
 src/traci-applications/examples/ns3-sumo-coupling.xml
 sumo-errors-or-collisions.xml
 .vscode/c_cpp_properties.json
+examples/multipath/git_token.txt
+ns3-sumo-coupling.xml
