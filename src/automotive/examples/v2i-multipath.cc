@@ -137,11 +137,11 @@ main (int argc, char *argv[])
   // ****************************************
 
   // tap devices name (should be created before)
-  std::string tap_l ("tap-left");
-  std::string tap_l1 ("tap-left-1");
-  std::string tap_r ("tap-right");
-  std::string tap_r1 ("tap-right-1");
-  uint64_t path2delay = 10; // delay between AP and remote host [mks]
+  // std::string tap_l ("tap-left");
+  // std::string tap_l1 ("tap-left-1");
+  // std::string tap_r ("tap-right");
+  // std::string tap_r1 ("tap-right-1");
+  // uint64_t path2delay = 10; // delay between AP and remote host [mks]
   double simTime = 60; // sim time, 1 min by default
 
   bool sumo_gui = true;
@@ -277,7 +277,7 @@ main (int argc, char *argv[])
 
   // configure CSMA AP <--> REMOTE
   csma.SetChannelAttribute ("DataRate", StringValue ("100Mbps"));
-  csma.SetChannelAttribute ("Delay", TimeValue (MicroSeconds (path2delay)));
+  csma.SetChannelAttribute ("Delay", TimeValue (MicroSeconds (1)));
   NetDeviceContainer dev_r_ap = csma.Install (nodes_r_ap);
 
   // Assign adress
@@ -347,9 +347,9 @@ main (int argc, char *argv[])
   // ****************************************************************************************************************
 
   /*** 0.a App Options ***/
-  std::string sumo_folder = "src/automotive/examples/sumo_files_v2i_map/";
+  std::string sumo_folder = "src/automotive/examples/sumo_files_v2v_map/";
   std::string mob_trace = "cars.rou.xml";
-  std::string sumo_config = "src/automotive/examples/sumo_files_v2i_map/map.sumo.cfg";
+  std::string sumo_config = "src/automotive/examples/sumo_files_v2v_map/map.sumo.cfg";
 
   // 0.b parsing xml to get num of veh
   std::cout << "Reading the .rou file..." << std::endl;
@@ -423,11 +423,7 @@ main (int argc, char *argv[])
         includedNode = nodes.Get (0);
         std::string m_vId = "veh1"; // sumo id of our first vehicle
         libsumo::TraCIColor red;
-        red.r = 255;
-        red.g = 0;
-        red.b = 0;
-        red.a = 255;
-
+        red.r = 255; red.g = 0; red.b = 0; red.a = 255;
         sumoClient->TraCIAPI::vehicle.setColor (m_vId, red); // set different color to our vehicle
         //sumoClient->vehicle.setColor("veh1",green);
       }
@@ -629,8 +625,8 @@ main (int argc, char *argv[])
   // //
   // Config::Connect ("/Names/app/Rtt", MakeCallback (&PingRtt));
 
-  wifiPhy.EnablePcapAll ("mp-wifi", true);
-  csma.EnablePcapAll ("mp-csma", true);
+  //wifiPhy.EnablePcapAll ("mp-wifi", true);
+  //csma.EnablePcapAll ("mp-csma", true);
   fdNet.EnablePcapAll ("mp-fd", true);
 
   // ********************************************************

@@ -23,3 +23,6 @@ def build(bld):
 
     obj = bld.create_ns3_program('mp-fd-wifi-lte-users',all_modules)
     obj.source = 'mp-fd-wifi-lte-users.cc'
+    
+    obj = bld.create_ns3_program('mp-fd-direct',all_modules)
+    obj.source = 'mp-fd-direct.cc'
