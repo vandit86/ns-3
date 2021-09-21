@@ -30,8 +30,8 @@
 #include "ns3/epc-helper.h"
 #include "ns3/lte-module.h"
 #include "ns3/config-store.h"
-#include "ns3/applications-module.h" //<-- for app
-#include "ns3/netanim-module.h" // <-- for netanim
+#include "ns3/applications-module.h"        //<-- for app
+#include "ns3/netanim-module.h"             //<-- for netanim
 
 /*  required for sumo copling */
 #include "ns3/automotive-module.h"
@@ -123,6 +123,51 @@ getNumberVeh (std::string path)
   return numberOfNodes;
 }
 
+/**
+   * TracedCallback signature for monitor mode receive events.
+   *
+   *
+   * \param packet the packet being received
+   * \param channelFreqMhz the frequency in MHz at which the packet is
+   *        received. Note that in real devices this is normally the
+   *        frequency to which  the receiver is tuned, and this can be
+   *        different than the frequency at which the packet was originally
+   *        transmitted. This is because it is possible to have the receiver
+   *        tuned on a given channel and still to be able to receive packets
+   *        on a nearby channel.
+   * \param txVector the TXVECTOR that holds RX parameters
+   * \param aMpdu the type of the packet (0 is not A-MPDU, 1 is a MPDU that is part of an A-MPDU and 2 is the last MPDU in an A-MPDU)
+   *        and the A-MPDU reference number (must be a different value for each A-MPDU but the same for each subframe within one A-MPDU)
+   * \param signalNoise signal power and noise power in dBm
+   * \param staId the STA-ID  (always 65535)
+   * \todo WifiTxVector should be passed by const reference because
+   * of its size.
+   */
+void
+MonitorSniffRx (Ptr<const Packet> packet, uint16_t channelFreqMhz, WifiTxVector txVector,
+                MpduInfo aMpdu, SignalNoiseDbm signalNoise, uint16_t staId)
+
+{
+  // g_samples++;
+  // g_signalDbmAvg += ((signalNoise.signal - g_signalDbmAvg) / g_samples);
+  // g_noiseDbmAvg += ((signalNoise.noise - g_noiseDbmAvg) / g_samples);
+  
+  // staId == 65535
+  // channelFreqMhz ==  5860
+
+  // std::cout << Simulator::Now().GetSeconds()  <<"\t" << signalNoise.signal
+  //                                             <<"\t" << signalNoise.noise 
+  //                                             << std::endl ; 
+  // Ipv4Header ipv4H ;
+
+  // WifiMacHeader wifiH;   
+  // if (uint32_t num = packet->PeekHeader(wifiH)){
+  //   std::cout<< "num : "<<num << "\ta1:"<<  wifiH.GetAddr1() << "\ta2:"<<  wifiH.GetAddr2() << std::endl; 
+  // } 
+
+
+}
+
 // ****************************************************************************************************************
 // ****************************************************************************************************************
 //                                      MAIN
@@ -144,7 +189,7 @@ main (int argc, char *argv[])
   // uint64_t path2delay = 10; // delay between AP and remote host [mks]
   double simTime = 60; // sim time, 1 min by default
 
-  bool sumo_gui = true;
+  bool sumo_gui = false;
   double sumo_updates = 0.01;
   std::string csv_name;
 
@@ -558,7 +603,7 @@ main (int argc, char *argv[])
   // Set the default gateway for the UE using a static routing
   ueStaticRouting->SetDefaultRoute (epcHelper->GetUeDefaultGatewayAddress (),
                                     ifce_l_lte.Get (0).second);
-
+  
   // add route to right lxc through wifi
   ueStaticRouting->AddNetworkRouteTo (Ipv4Address ("14.0.0.0"), Ipv4Mask ("255.0.0.0"),
                                       Ipv4Address ("16.0.0.1"), ifce_l_wifi.Get (0).second);
@@ -625,6 +670,7 @@ main (int argc, char *argv[])
   // //
   // Config::Connect ("/Names/app/Rtt", MakeCallback (&PingRtt));
 
+  //wifiPhy.EnablePcap("mp-v2i",nodes); 
   //wifiPhy.EnablePcapAll ("mp-wifi", true);
   //csma.EnablePcapAll ("mp-csma", true);
   fdNet.EnablePcapAll ("mp-fd", true);
@@ -636,6 +682,9 @@ main (int argc, char *argv[])
   // realtime jitter calculation :
   // change interval
   // Simulator::Schedule (MilliSeconds(100), &JitterMonitor, realSim);
+
+
+  Config::ConnectWithoutContext ("/NodeList/0/DeviceList/*/Phy/MonitorSnifferRx", MakeCallback (&MonitorSniffRx));
 
   // config output , write config params to file
   Config::SetDefault ("ns3::ConfigStore::Filename", StringValue ("output-attributes.txt"));
