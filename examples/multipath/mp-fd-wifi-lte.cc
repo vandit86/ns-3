@@ -95,12 +95,12 @@ int tun_open( std::string dev)
 }
 
 // TODO: remove this function 
-static void
-PingRtt (std::string context, Time rtt)
-{
-  NS_LOG_UNCOND ("Received Response with RTT = " << rtt);
-  //Simulator::GetImplementation(); 
-}
+// static void
+// PingRtt (std::string context, Time rtt)
+// {
+//   NS_LOG_UNCOND ("Received Response with RTT = " << rtt);
+//   //Simulator::GetImplementation(); 
+// }
 
 /**
    * Set the address of a previously added UE
@@ -149,34 +149,21 @@ JitterMonitor (Ptr<RealtimeSimulatorImpl> rt){
 int
 main (int argc, char *argv[])
 {
-  std::string remote ("14.0.0.2"); 
-  std::string mask ("255.0.0.0");
-  std::string pi ("no");
-  
-  // tap devices name (should be pre created) 
+  // namespaces names: (should be pre created) 
   std::string tap_l ("tap-left");
   std::string tap_l1 ("tap-left-1");
   std::string tap_r ("tap-right");
   std::string tap_r1 ("tap-right-1");
   uint64_t path2delay = 10;         // delay between AP and remote host [mks]
-  double path2err = 0.0;            // packet error rate on path 2 
   double simTime = 60;              // sim time, 1 min by default 
   //
   // Allow the user to override any of the defaults at run-time, via
   // command-line arguments
   //
   CommandLine cmd (__FILE__);
-  cmd.AddValue ("remote", "Remote IP address (dotted decimal only please)", remote);
-  cmd.AddValue ("tapMask", "Network mask for configure the TAP device (dotted decimal only please)", mask);
-  cmd.AddValue ("modePi", "If 'yes' a PI header will be added to the traffic traversing the device(flag IFF_NOPI will be unset).", pi);
   cmd.AddValue("simTime", "Total duration of the simulation [s])", simTime);
   cmd.AddValue("path2delay", "delay between AP and remote host on second path [mks]", path2delay);
-  cmd.AddValue("path2err", "packet error rate between AP and remote host on second path", path2err);
   cmd.Parse (argc, argv);
-
-  // TODO:: remove or change 
-  Ipv4Address remoteIp (remote.c_str ());
-  Ipv4Mask tapMask (mask.c_str ());
 
   GlobalValue::Bind ("SimulatorImplementationType", StringValue ("ns3::RealtimeSimulatorImpl"));
   GlobalValue::Bind ("ChecksumEnabled", BooleanValue (true));
@@ -277,13 +264,6 @@ main (int argc, char *argv[])
   // Install devices on nodes from path #1
   NetDeviceContainer dev_l_ap = wifi.Install (wifiPhy, wifiMac, nodes_l_ap);
   NetDeviceContainer dev_r_ap = csma.Install (nodes_r_ap);
-
-  // error model : probability of packet loss in one dev on the path
-  Ptr<RateErrorModel> em1 =
-      CreateObjectWithAttributes<RateErrorModel> ("ErrorRate", DoubleValue (path2err), "ErrorUnit",
-                                                  EnumValue (RateErrorModel::ERROR_UNIT_PACKET));
-  dev_r_ap.Get (1)->SetAttribute ("ReceiveErrorModel", PointerValue (em1));
-  // dev_r_ap.Get (0)->SetAttribute ("ReceiveErrorModel", PointerValue (em1));
 
   // Assign adress 
   ipv4h.SetBase ("16.0.0.0", "255.0.0.0", "0.0.0.1");
@@ -487,24 +467,24 @@ main (int argc, char *argv[])
   // of a hassle and since there is no law that says we cannot mix the
   // helper API with the low level API, let's just use the helper.
   //
-  NS_LOG_INFO ("Create V4Ping Appliation");
-  Ptr<V4Ping> app = CreateObject<V4Ping> ();
-  app->SetAttribute ("Remote", Ipv4AddressValue (remoteIp));
-  app->SetAttribute ("Verbose", BooleanValue (true));
-  //nodes.Get(0)->AddApplication (app);
-  app->SetStartTime (Seconds (1.0));
-  app->SetStopTime (Seconds (simTime-1));
+  // NS_LOG_INFO ("Create V4Ping Appliation");
+  // Ptr<V4Ping> app = CreateObject<V4Ping> ();
+  // app->SetAttribute ("Remote", Ipv4AddressValue (remoteIp));
+  // app->SetAttribute ("Verbose", BooleanValue (true));
+  // //nodes.Get(0)->AddApplication (app);
+  // app->SetStartTime (Seconds (1.0));
+  // app->SetStopTime (Seconds (simTime-1));
   
   //
   // Give the application a name.  This makes life much easier when constructing
   // config paths.
   //
-  Names::Add ("app", app);
+  // Names::Add ("app", app);
 
   //
   // Hook a trace to print something when the response comes back.
   //
-  Config::Connect ("/Names/app/Rtt", MakeCallback (&PingRtt));
+  // Config::Connect ("/Names/app/Rtt", MakeCallback (&PingRtt));
 
   wifiPhy.EnablePcapAll ("mp-wifi", true);
   csma.EnablePcapAll("mp-csma", true);

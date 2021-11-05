@@ -30,8 +30,8 @@
 #include "ns3/epc-helper.h"
 #include "ns3/lte-module.h"
 #include "ns3/config-store.h"
-#include "ns3/applications-module.h"        //<-- for app
-#include "ns3/netanim-module.h"             //<-- for netanim
+#include "ns3/applications-module.h" //<-- for app
+#include "ns3/netanim-module.h" //<-- for netanim
 
 /*  required for sumo copling */
 #include "ns3/automotive-module.h"
@@ -44,44 +44,44 @@
 #include <unistd.h>
 
 using namespace ns3;
-NS_LOG_COMPONENT_DEFINE ("MpFdExample");
-
-// TODO: remove this function
-static void
-PingRtt (std::string context, Time rtt)
-{
-  NS_LOG_UNCOND ("Received Response with RTT = " << rtt);
-  //Simulator::GetImplementation();
-}
+/* we run in real-time , so no loggin is avilable  */
+//NS_LOG_COMPONENT_DEFINE ("MpFdExample");
 
 /**
    * Set the address of a previously added UE
-   * \brief  we need to add address of lxc container connected through wired (CSMA) connection to the UE because in LENA, in 
-   * the downlink, the PGW uses the destination IP address to identify a single UE and the eNB to which it is attached to. 
+   * \brief  we need to add the address of namespace device connected through 
+   * wired (CSMA) connection to the UE because in LENA, in the downlink, the 
+   * PGW uses the destination IP address to identify a single UE and the eNB 
+   * to which it is attached to. 
    * If you specify a destination IP address that does not belong to any UE, 
-   * the packet will just be dropped by the PGW, because it would not know to which eNB it should be routed 
-   * through
+   * the packet will just be dropped by the PGW, because it 
+   * would not know to which eNB it should be routed through. This function
+   * aims to resolve this problem. 
    * \param pgw PGW node 
    * \param ueLteNetDev lteNetDevice installed on the UE (nedded to get IMSI)
-   * \param ueAddr the IPv4 address of the LXC container connected to ue Net device
+   * \param ueAddr the IPv4 address of the LXC container connected to UE
 */
 void
 addBackAddress (Ptr<Node> pgw, Ptr<NetDevice> ueLteNetDev, Ipv4Address addr)
 {
-  // First we need to get IMSI of ueLteNetDevice conencted through csma link to container
+  // First we need to get IMSI of ueLteNetDevice 
   Ptr<LteUeNetDevice> uedev = ueLteNetDev->GetObject<LteUeNetDevice> ();
   uint64_t imsi = uedev->GetImsi ();
 
   // get PGW application from pgw node
-  Ptr<EpcPgwApplication> pgwApp = pgw->GetApplication (0)->GetObject<EpcPgwApplication> ();
+  Ptr<EpcPgwApplication> pgwApp = 
+                    pgw->GetApplication (0)->GetObject<EpcPgwApplication>();
 
   // add container address to allow traffic through PGW node
+  // drawback: no traffic can be sent to UE divice dirrectly 
   pgwApp->SetUeAddress (imsi, addr);
 }
 
 /**
- * \brief Calculate and print realtime execution jitter time 
- * \param rt RealtimeSimulatorImpl pointer   
+ * \brief Calculate and print realtime execution jitter time, i.e differance 
+ * between host wall clock and simulation clock.  
+ * \param rt RealtimeSimulatorImpl pointer 
+ * TODO :: add period param for scheduling (now is 100 ms by def)   
  */
 void
 JitterMonitor (Ptr<RealtimeSimulatorImpl> rt)
@@ -95,9 +95,10 @@ JitterMonitor (Ptr<RealtimeSimulatorImpl> rt)
 }
 
 /**
- * Read from the mob_trace the number of vehicles that will be created.
-  *       The number of vehicles is directly parsed from the rou.xml file, looking at all
-  *       the valid XML elements of type <vehicle 
+ * \brief Read from the mob_trace the number of vehicles that will be created.
+  *The number of vehicles is directly parsed from the rou.xml file, looking at 
+  * all the valid XML elements of type <vehicle
+  *\param path to rou.xml file to be parsed  
 */
 int
 getNumberVeh (std::string path)
@@ -108,7 +109,7 @@ getNumberVeh (std::string path)
   rou_xml_file = xmlParseFile (path.c_str ());
   if (rou_xml_file == NULL)
     {
-      NS_FATAL_ERROR ("Error: unable to parse the specified XML file: " << path);
+      NS_FATAL_ERROR ("Error: unable to parse the specified XML file: "<< path);
     }
   int numberOfNodes = -1;
   numberOfNodes = XML_rou_count_vehicles (rou_xml_file);
@@ -116,16 +117,16 @@ getNumberVeh (std::string path)
   xmlCleanupParser ();
   if (numberOfNodes == -1)
     {
-      NS_FATAL_ERROR (
-          "Fatal error: cannot gather the number of vehicles from the specified XML file: "
-          << path << ". Please check if it is a correct SUMO file.");
+      NS_FATAL_ERROR(
+            "Fatal error: cannot gather the number of vehicles from the \
+            specified XML file:"
+            << path << ". Please check if it is a correct SUMO file.");
     }
   return numberOfNodes;
 }
 
 /**
-   * TracedCallback signature for monitor mode receive events.
-   *
+   * \brief TracedCallback signature for monitor mode receive events.
    *
    * \param packet the packet being received
    * \param channelFreqMhz the frequency in MHz at which the packet is
@@ -136,8 +137,10 @@ getNumberVeh (std::string path)
    *        tuned on a given channel and still to be able to receive packets
    *        on a nearby channel.
    * \param txVector the TXVECTOR that holds RX parameters
-   * \param aMpdu the type of the packet (0 is not A-MPDU, 1 is a MPDU that is part of an A-MPDU and 2 is the last MPDU in an A-MPDU)
-   *        and the A-MPDU reference number (must be a different value for each A-MPDU but the same for each subframe within one A-MPDU)
+   * \param aMpdu the type of the packet (0 is not A-MPDU, 1 is a MPDU that 
+   *        is part of an A-MPDU and 2 is the last MPDU in an A-MPDU)
+   *        and the A-MPDU reference number (must be a different value for 
+   *        each A-MPDU but the same for each subframe within one A-MPDU)
    * \param signalNoise signal power and noise power in dBm
    * \param staId the STA-ID  (always 65535)
    * \todo WifiTxVector should be passed by const reference because
@@ -151,28 +154,27 @@ MonitorSniffRx (Ptr<const Packet> packet, uint16_t channelFreqMhz, WifiTxVector 
   // g_samples++;
   // g_signalDbmAvg += ((signalNoise.signal - g_signalDbmAvg) / g_samples);
   // g_noiseDbmAvg += ((signalNoise.noise - g_noiseDbmAvg) / g_samples);
-  
+
   // staId == 65535
   // channelFreqMhz ==  5860
 
   // std::cout << Simulator::Now().GetSeconds()  <<"\t" << signalNoise.signal
-  //                                             <<"\t" << signalNoise.noise 
-  //                                             << std::endl ; 
+  //                                             <<"\t" << signalNoise.noise
+  //                                             << std::endl ;
   // Ipv4Header ipv4H ;
 
-  // WifiMacHeader wifiH;   
+  // WifiMacHeader wifiH;
   // if (uint32_t num = packet->PeekHeader(wifiH)){
-  //   std::cout<< "num : "<<num << "\ta1:"<<  wifiH.GetAddr1() << "\ta2:"<<  wifiH.GetAddr2() << std::endl; 
-  // } 
-
-
+  //   std::cout<< "num : "<<num << "\ta1:"<<  wifiH.GetAddr1() 
+                // << "\ta2:"<<  wifiH.GetAddr2() << std::endl;
+  // }
 }
 
-// ****************************************************************************************************************
-// ****************************************************************************************************************
+// ***************************************************************************
+// ***************************************************************************
 //                                      MAIN
-// ****************************************************************************************************************
-// ****************************************************************************************************************
+// ***************************************************************************
+// ***************************************************************************
 int
 main (int argc, char *argv[])
 {
@@ -180,17 +182,9 @@ main (int argc, char *argv[])
   // ****************************************
   // Global configurations
   // ****************************************
-
-  // tap devices name (should be created before)
-  // std::string tap_l ("tap-left");
-  // std::string tap_l1 ("tap-left-1");
-  // std::string tap_r ("tap-right");
-  // std::string tap_r1 ("tap-right-1");
-  // uint64_t path2delay = 10; // delay between AP and remote host [mks]
-  double simTime = 60; // sim time, 1 min by default
-
+  double simTime = 60;          // sim time, 1 min by default
   bool sumo_gui = false;
-  double sumo_updates = 0.01;
+  double sumo_updates = 0.01;   // sumo update rate 
   std::string csv_name;
 
   // Disabling this option turns off the whole V2X application
@@ -203,66 +197,81 @@ main (int argc, char *argv[])
   // bool aggregate_out = false;
   // bool vehicle_vis = false;
 
+  // TODO : push sumo path folder/files declaration up to here  
   //
-  // Allow the user to override any of the defaults at run-time, via command-line arguments
+  // Allow the user to override any of the defaults at run-time, via 
+  // command-line arguments
   //
   CommandLine cmd (__FILE__);
   cmd.AddValue ("simTime", "Total duration of the simulation [s])", simTime);
   cmd.AddValue ("sumo-gui", "Use SUMO gui or not", sumo_gui);
   // cmd.AddValue ("sumo-folder","Position of sumo config files",sumo_folder);
   // cmd.AddValue ("mob-trace", "Name of the mobility trace file", mob_trace);
-  // cmd.AddValue ("sumo-config", "Location and name of SUMO configuration file", sumo_config);
+  // cmd.AddValue ("sumo-config", "Location and name of SUMO configuration file, 
+                                                // sumo_config);
   cmd.AddValue ("csv-log", "Name of the CSV log file", csv_name);
-  cmd.AddValue ("summary", "Print a summary for each vehicle at the end of the simulation", print_summary);
-  // cmd.AddValue ("vehicle-visualizer", "Activate the web-based vehicle visualizer for ms-van3t", vehicle_vis);
-  cmd.AddValue (
-      "send-cam",
-      "Turn on or off the transmission of CAMs, thus turning on or off the whole V2X application",
-      send_cam);
-  // cmd.AddValue ("csv-log-cumulative", "Name of the CSV log file for the cumulative (average) PRR and latency data", csv_name_cumulative);
-  // cmd.AddValue ("netstate-dump-file", "Name of the SUMO netstate-dump file containing the vehicle-related information throughout the whole simulation", sumo_netstate_file_name);
+  cmd.AddValue ("summary", 
+                "Print a summary for each vehicle at the end of the simulation",
+                print_summary);
+  //cmd.AddValue ("vehicle-visualizer", 
+                // "Activate the web-based vehicle visualizer for ms-van3t", 
+                // vehicle_vis);
+  cmd.AddValue ("send-cam",
+                "Turn on or off the transmission of CAMs, thus turning on \
+                or off the whole V2X application",
+                send_cam);
+//   cmd.AddValue ("csv-log-cumulative",  
+//                     "Name of the CSV log file for the cumulative (average) \
+//                     PRR and latency data", 
+//                     csv_name_cumulative);
+  
+// cmd.AddValue ("netstate-dump-file", 
+//     "Name of the SUMO netstate-dump file containing the vehicle-related \
+//      information throughout the whole simulation", sumo_netstate_file_name);
   cmd.AddValue ("baseline", "Baseline for PRR calculation", m_baseline_prr);
   cmd.AddValue ("prr-sup", "Use the PRR supervisor or not", m_prr_sup);
 
   cmd.Parse (argc, argv);
 
-  // REAL TIME
-  GlobalValue::Bind ("SimulatorImplementationType", StringValue ("ns3::RealtimeSimulatorImpl"));
+  // Turn on simulation in real-time mode  
+  GlobalValue::Bind ("SimulatorImplementationType", 
+                    StringValue ("ns3::RealtimeSimulatorImpl"));
   GlobalValue::Bind ("ChecksumEnabled", BooleanValue (true));
   // --ns3::RealtimeSimulatorImpl::SynchronizationMode=HardLimit
 
-  // get pointer to rt simulation impl
+  // get pointer to real-time simulation impl
   ns3::Ptr<ns3::RealtimeSimulatorImpl> realSim =
-      ns3::DynamicCast<ns3::RealtimeSimulatorImpl> (ns3::Simulator::GetImplementation ());
+                    ns3::DynamicCast<ns3::RealtimeSimulatorImpl> 
+                                    (ns3::Simulator::GetImplementation ());
 
   //
   // ****************************************
-  // Nodes creation
+  //            Nodes creation
   // ****************************************
   // Create two ghost nodes.  The first will represent the virtual machine host
   // on the left side of the network; and the second will represent the VM on
   // the right side.
   //
 
-  NodeContainer nodes; // Create two ghost nodes.
+  NodeContainer nodes;      // Create two ghost nodes.
   nodes.Create (2);
 
-  NodeContainer nodeAP; // create one wifi AP node
+  NodeContainer nodeAP;     // create one wifi AP node
   nodeAP.Create (1);
 
-  NodeContainer enbNode; // create one eNB node
+  NodeContainer enbNode;    // create one eNB node
   enbNode.Create (1);
 
-  int numberOfNodes; // number of vehicles from rou.xml file
-  NodeContainer obuNodes; // node container for vehicle OBU
+  int numberOfNodes;        // number of vehicles from rou.xml file
+  NodeContainer obuNodes;   // node container for vehicle OBU
   uint32_t nodeCounter = 0; //
 
   // ****************************************
   // Helpers used in simulation
   // ****************************************
   InternetStackHelper inet; // internet stack helper
-  CsmaHelper csma; // Csma Helper
-  Ipv4AddressHelper ipv4h; // Ipv4 Address Helper
+  CsmaHelper csma;          // Csma Helper
+  Ipv4AddressHelper ipv4h;  // Ipv4 Address Helper
   Ipv4StaticRoutingHelper ipv4RoutingHelper; // Ipv4 Static Routing Helper
 
   // ****************************************
@@ -271,10 +280,11 @@ main (int argc, char *argv[])
   inet.Install (nodeAP);
   inet.Install (nodes);
 
-  // ****************************************************************************************************************
-  //                                            MOBILITY MODEL
-  // ****************************************************************************************************************
-  Ptr<ListPositionAllocator> positionAlloc = CreateObject<ListPositionAllocator> ();
+  // **************************************************************************
+  //                      MOBILITY MODEL
+  // **************************************************************************
+  Ptr<ListPositionAllocator> positionAlloc = 
+                            CreateObject<ListPositionAllocator> ();
   positionAlloc->Add (Vector (0, 0, 0)); // pos of left
   positionAlloc->Add (Vector (0, 0, 20)); // pos of AP  --> center of SUMO map
   positionAlloc->Add (Vector (25, 0, 0)); // pos of right
@@ -288,13 +298,14 @@ main (int argc, char *argv[])
   mobility.Install (nodes.Get (1));
   mobility.Install (enbNode.Get (0));
 
-  // ****************************************************************************************************************
-  //                                  Configure PATH 1: WAVE (802.11p) and CSMA
-  // ****************************************************************************************************************
+  // **************************************************************************
+  //                     Configure PATH 1: (802.11p and CSMA)
+  // **************************************************************************
 
   NodeContainer nodes_l_ap (nodes.Get (0), nodeAP.Get (0));
   NodeContainer nodes_r_ap (nodes.Get (1), nodeAP.Get (0));
 
+  /* 802.11p param configuration */
   int txPower = 23;
   float datarate = 6;
   std::string phyMode ("OfdmRate6MbpsBW10MHz");
@@ -303,7 +314,9 @@ main (int argc, char *argv[])
   YansWifiPhyHelper wifiPhy;
   wifiPhy.Set ("TxPowerStart", DoubleValue (txPower));
   wifiPhy.Set ("TxPowerEnd", DoubleValue (txPower));
-  std::cout << "Setting up the 802.11p channel @ " << datarate << " Mbit/s, 10 MHz, and tx power "
+  
+  std::cout << "Setting up the 802.11p channel @ " 
+            << datarate << " Mbit/s, 10 MHz, and tx power "
             << (int) txPower << " dBm." << std::endl;
 
   YansWifiChannelHelper wifiChannel = YansWifiChannelHelper::Default ();
@@ -314,11 +327,13 @@ main (int argc, char *argv[])
   wifiPhy.SetPcapDataLinkType (YansWifiPhyHelper::DLT_IEEE802_11);
   NqosWaveMacHelper wifi80211pMac = NqosWaveMacHelper::Default ();
   Wifi80211pHelper wifi80211p = Wifi80211pHelper::Default ();
-  wifi80211p.SetRemoteStationManager ("ns3::ConstantRateWifiManager", "DataMode",
-                                      StringValue (phyMode), "ControlMode", StringValue (phyMode));
+  wifi80211p.SetRemoteStationManager ("ns3::ConstantRateWifiManager", 
+                                        "DataMode", StringValue (phyMode), 
+                                        "ControlMode", StringValue (phyMode));
 
   // Install devices on nodes from path #1
-  NetDeviceContainer dev_l_ap = wifi80211p.Install (wifiPhy, wifi80211pMac, nodes_l_ap);
+  NetDeviceContainer dev_l_ap = 
+                wifi80211p.Install (wifiPhy, wifi80211pMac, nodes_l_ap);
 
   // configure CSMA AP <--> REMOTE
   csma.SetChannelAttribute ("DataRate", StringValue ("100Mbps"));
@@ -333,32 +348,38 @@ main (int argc, char *argv[])
   Ipv4InterfaceContainer ifce_ap_csma = ipv4h.Assign (dev_r_ap.Get (1));
   Ipv4InterfaceContainer ifce_r_csma = ipv4h.Assign (dev_r_ap.Get (0));
 
-  // ****************************************************************************************************************
-  //                                  Configure PATH 2: LTE and CSMA
-  // ****************************************************************************************************************
+  // ************************************************************************
+  //                 Configure PATH 2: LTE and CSMA
+  // ************************************************************************
 
   // Default LTE configuration
-  Config::SetDefault ("ns3::LteSpectrumPhy::CtrlErrorModelEnabled", BooleanValue (false));
-  Config::SetDefault ("ns3::LteSpectrumPhy::DataErrorModelEnabled", BooleanValue (false));
-  Config::SetDefault ("ns3::RrFfMacScheduler::HarqEnabled", BooleanValue (false));
+  Config::SetDefault ("ns3::LteSpectrumPhy::CtrlErrorModelEnabled", 
+                                                BooleanValue (false));
+  Config::SetDefault ("ns3::LteSpectrumPhy::DataErrorModelEnabled", 
+                                                BooleanValue (false));
+  Config::SetDefault ("ns3::RrFfMacScheduler::HarqEnabled", 
+                                                BooleanValue (false));
   Config::SetDefault ("ns3::LteHelper::PathlossModel",
                       StringValue ("ns3::FriisSpectrumPropagationLossModel"));
   Config::SetDefault ("ns3::LteEnbNetDevice::UlBandwidth",
-                      UintegerValue (100)); // 5MHz,  100 for 20MHz bandwidth
-  Config::SetDefault ("ns3::LteEnbNetDevice::DlBandwidth", UintegerValue (100)); //20MHz bandwidth
+                        UintegerValue (100)); // 5MHz,  100 for 20MHz bandwidth
+  Config::SetDefault ("ns3::LteEnbNetDevice::DlBandwidth", 
+                        UintegerValue (100)); //20MHz bandwidth
 
-  // testing
-  // Config::SetDefault ("ns3::CcHelper::DlBandwidth", UintegerValue (100)); // 5MHz,  100 for 20MHz bandwidth
-  // Config::SetDefault ("ns3::ComponentCarrier::DlBandwidth", UintegerValue (100)); // 5MHz,  100 for 20MHz bandwidth
+//   testing
+//   Config::SetDefault ("ns3::CcHelper::DlBandwidth",  
+//                  UintegerValue (100)); // 5MHz,  100 for 20MHz bandwidth
+//   Config::SetDefault ("ns3::ComponentCarrier::DlBandwidth", 
+//                  UintegerValue (100)); // 5MHz,  100 for 20MHz bandwidth
 
+    // Adaptive Modulation and Coding
   Config::SetDefault ("ns3::LteAmc::AmcModel",
-                      EnumValue (LteAmc::PiroEW2010)); // Adaptive Modulation and Coding
-
-  // TODO:: change to LteHelper lteHelper instead of CreateObject and move to up
+                        EnumValue (LteAmc::PiroEW2010)); 
 
   // get LTE / EPC helpers
   Ptr<LteHelper> lteHelper = CreateObject<LteHelper> ();
-  Ptr<PointToPointEpcHelper> epcHelper = CreateObject<PointToPointEpcHelper> ();
+  Ptr<PointToPointEpcHelper> epcHelper = 
+                            CreateObject<PointToPointEpcHelper> ();
   lteHelper->SetEpcHelper (epcHelper);
 
   // Get the pgw node to install the csma device
@@ -366,11 +387,13 @@ main (int argc, char *argv[])
 
   // Install LTE Devices to the nodes
   NetDeviceContainer enbLteDevs = lteHelper->InstallEnbDevice (enbNode);
-  NetDeviceContainer ueLteDevs = lteHelper->InstallUeDevice (
-      NodeContainer (nodes.Get (0))); // TODO: test without NodeContainer
-
+  // TODO: test without NodeContainer
+  NetDeviceContainer ueLteDevs = 
+        lteHelper->InstallUeDevice (NodeContainer (nodes.Get (0))); 
+  
   // assign ipv4 adresses to UE Devices
-  Ipv4InterfaceContainer ifce_l_lte = epcHelper->AssignUeIpv4Address (ueLteDevs);
+  Ipv4InterfaceContainer ifce_l_lte = 
+                    epcHelper->AssignUeIpv4Address (ueLteDevs);
 
   // Attach one UE per eNodeB
   // side effect: the default EPS bearer will be activated
@@ -384,35 +407,43 @@ main (int argc, char *argv[])
 
   // and assign ipv4 adress to ifaces
   ipv4h.SetBase ("12.0.0.0", "255.0.0.0", "0.0.0.1");
-  Ipv4InterfaceContainer ifce_pgw_csma = ipv4h.Assign (NetDeviceContainer (dev_r_pgw.Get (1)));
-  Ipv4InterfaceContainer ifce_r_csma1 = ipv4h.Assign (NetDeviceContainer (dev_r_pgw.Get (0)));
+  Ipv4InterfaceContainer ifce_pgw_csma = 
+                    ipv4h.Assign (NetDeviceContainer (dev_r_pgw.Get (1)));
+  Ipv4InterfaceContainer ifce_r_csma1 = 
+                    ipv4h.Assign (NetDeviceContainer (dev_r_pgw.Get (0)));
 
-  // ****************************************************************************************************************
-  //                             Setup TRACI/SUMO and configure other Vehicles
-  // ****************************************************************************************************************
+  
+  // *************************************************************************
+  //               Setup TRACI/SUMO and configure other Vehicles
+  // *************************************************************************
 
   /*** 0.a App Options ***/
   std::string sumo_folder = "src/automotive/examples/sumo_files_v2v_map/";
   std::string mob_trace = "cars.rou.xml";
-  std::string sumo_config = "src/automotive/examples/sumo_files_v2v_map/map.sumo.cfg";
+  std::string sumo_config = 
+                "src/automotive/examples/sumo_files_v2v_map/map.sumo.cfg";
 
   // 0.b parsing xml to get num of veh
   std::cout << "Reading the .rou file..." << std::endl;
   std::string path = sumo_folder + mob_trace;
-  numberOfNodes = getNumberVeh (path);                  // parsing sumo xml to get num vehicles
+  numberOfNodes = getNumberVeh (path); // parsing sumo xml to get num vehicles
   std::cout << "The .rou file has been read: " << numberOfNodes
-            << " vehicles will be present in the simulation." << std::endl;
+            << "vehicles will be present in the simulation." << std::endl;
 
-  /*** 1. Configure dynamic vehicles  ***/
-  obuNodes.Create (numberOfNodes - 1); //   (-1) since our UE node is placed in one veh
+  /* 1. Configure dynamic vehicles */
+  //(-1) since our UE node is placed in first vehicle
+  obuNodes.Create (numberOfNodes - 1); 
   if (obuNodes.GetN () > 0)
     {
-      mobility.Install (obuNodes);  // install mobility model
+      mobility.Install (obuNodes); // install mobility model
       //inet.Install (obuNodes);      // add inet stack
+      
+      //install 802.11p devices
       NetDeviceContainer obuNetDevices =
-          wifi80211p.Install (wifiPhy, wifi80211pMac, obuNodes); // install 802.11p devices
-      /* Give packet socket powers to nodes (otherwise, if the app tries to create a PacketSocket, 
-      CreateSocket will end up with a segmentation fault */
+          wifi80211p.Install (wifiPhy, wifi80211pMac, obuNodes); 
+      /* Give packet socket powers to nodes (otherwise, 
+        if the app tries to create a PacketSocket, 
+        CreateSocket will end up with a segmentation fault */
       PacketSocketHelper packetSocket;
       packetSocket.Install (obuNodes);
     }
@@ -420,8 +451,13 @@ main (int argc, char *argv[])
   /*** 2. Configure sumo cliente  ***/
   Ptr<TraciClient> sumoClient = CreateObject<TraciClient> ();
   sumoClient->SetAttribute ("SumoConfigPath", StringValue (sumo_config));
-  sumoClient->SetAttribute ("SumoBinaryPath", StringValue ("")); // use system installation of sumo
-  sumoClient->SetAttribute ("SynchInterval", TimeValue (Seconds (sumo_updates)));
+  
+  // use system installation of sumo
+  sumoClient->SetAttribute ("SumoBinaryPath", StringValue ("")); 
+  
+  sumoClient->SetAttribute ("SynchInterval", 
+                            TimeValue (Seconds (sumo_updates)));
+  
   sumoClient->SetAttribute ("StartTime", TimeValue (Seconds (0.0)));
   sumoClient->SetAttribute ("SumoGUI", (BooleanValue) sumo_gui);
   sumoClient->SetAttribute ("SumoPort", UintegerValue (3400));
@@ -430,12 +466,15 @@ main (int argc, char *argv[])
   sumoClient->SetAttribute ("SumoStepLog", BooleanValue (false));
   sumoClient->SetAttribute ("SumoSeed", IntegerValue (10));
 
-  std::string sumo_additional_options = "--verbose true";
-  sumo_additional_options += " --collision.action warn --collision.check-junctions "
-                             "--error-log=sumo-errors-or-collisions.xml";
+  std::string sumo_additional_options = "--verbose true \
+                            --collision.action warn \
+                            --collision.check-junctions \
+                            --error-log=sumo-errors-or-collisions.xml";
 
   sumoClient->SetAttribute ("SumoWaitForSocket", TimeValue (Seconds (1.0)));
-  sumoClient->SetAttribute ("SumoAdditionalCmdOptions", StringValue (sumo_additional_options));
+  
+  sumoClient->SetAttribute ("SumoAdditionalCmdOptions", 
+                        StringValue (sumo_additional_options));
 
   /*** 3. Create and setup application to run on nodes, app ***/
   areaSpeedAdvisorClient80211pHelper AreaSpeedAdvisorClient80211pHelper;
@@ -443,60 +482,87 @@ main (int argc, char *argv[])
 
   // PRR supervisor auxilary object (false by def)
   Ptr<PRRSupervisor> prrSup = NULL;
-  PRRSupervisor prrSupObj(m_baseline_prr);
-  if(m_prr_sup)
+  PRRSupervisor prrSupObj (m_baseline_prr);
+  if (m_prr_sup)
     {
       prrSup = &prrSupObj;
-      prrSup->setTraCIClient(sumoClient);
+      prrSup->setTraCIClient (sumoClient);
     }
 
-  AreaSpeedAdvisorClient80211pHelper.SetAttribute ("ServerAddr", Ipv4AddressValue (remoteHostAddr));
+  AreaSpeedAdvisorClient80211pHelper.SetAttribute(
+                        "ServerAddr", Ipv4AddressValue (remoteHostAddr));
+  
+  // pass TraciClient object for accessing sumo in application                        
+  AreaSpeedAdvisorClient80211pHelper.SetAttribute(
+                        "Client", (PointerValue) sumoClient); 
+  
+  AreaSpeedAdvisorClient80211pHelper.SetAttribute(
+                        "PrintSummary", BooleanValue (print_summary));
+  
+  // working in real time ONLY
   AreaSpeedAdvisorClient80211pHelper.SetAttribute (
-      "Client",
-      (PointerValue) sumoClient); // pass TraciClient object for accessing sumo in application
-  AreaSpeedAdvisorClient80211pHelper.SetAttribute ("PrintSummary", BooleanValue (print_summary));
-  AreaSpeedAdvisorClient80211pHelper.SetAttribute ("RealTime", BooleanValue (true));  // working in real time ONLY
-  AreaSpeedAdvisorClient80211pHelper.SetAttribute ("CSV", StringValue (csv_name));
-  AreaSpeedAdvisorClient80211pHelper.SetAttribute ("SendCAM", BooleanValue (send_cam));
-  AreaSpeedAdvisorClient80211pHelper.SetAttribute ("PRRSupervisor", PointerValue (prrSup));
+                            "RealTime", BooleanValue (true));
 
-  /* callback function for node creation */
+  AreaSpeedAdvisorClient80211pHelper.SetAttribute(
+                            "CSV", StringValue (csv_name));
+  
+  AreaSpeedAdvisorClient80211pHelper.SetAttribute(
+                            "SendCAM", BooleanValue (send_cam));
+  
+  AreaSpeedAdvisorClient80211pHelper.SetAttribute(
+                            "PRRSupervisor", PointerValue (prrSup));
+
+  /* callback function for node creation, return newlly created Node  */
   std::function<Ptr<Node> ()> setupNewWifiNode = [&] () -> Ptr<Node> {
     Ptr<Node> includedNode;
-    if (nodeCounter == 0) // veh1 is our UE connected to Left LXC
+    /* 
+        first time call this function
+        veh1 is our UE connected to Left Namespace
+    */ 
+    if (nodeCounter == 0) 
       {
+        // sumo id of our first vehicle
+        std::string m_vId = "veh1"; 
+        
         includedNode = nodes.Get (0);
-        std::string m_vId = "veh1"; // sumo id of our first vehicle
         libsumo::TraCIColor red;
-        red.r = 255; red.g = 0; red.b = 0; red.a = 255;
-        sumoClient->TraCIAPI::vehicle.setColor (m_vId, red); // set different color to our vehicle
-        //sumoClient->vehicle.setColor("veh1",green);
+        red.r = 255;
+        red.g = 0;
+        red.b = 0;
+        red.a = 255;
+        // set different color to our vehicle
+        sumoClient->TraCIAPI::vehicle.setColor (m_vId, red); 
       }
     else
       {
-        includedNode = obuNodes.Get (nodeCounter - 1); // get from the node pool (starting from 0)
+        // get from the node pool (starting from 0)
+        includedNode = obuNodes.Get (nodeCounter - 1); 
       }
     nodeCounter++; //
-    std::cout << "Created Vehicle ID : " << nodeCounter << ", Node ID : " << includedNode->GetId ()
-              << std::endl;
+    
+    std::cout   << "Created Vehicle ID : " << nodeCounter << ", Node ID : " 
+                << includedNode->GetId () << std::endl;
 
     /* Install Application */
-    ApplicationContainer ClientApp = AreaSpeedAdvisorClient80211pHelper.Install (includedNode);
+    ApplicationContainer ClientApp = 
+                AreaSpeedAdvisorClient80211pHelper.Install (includedNode);
     ClientApp.Start (Seconds (0.0));
-    ClientApp.Stop (ns3::Seconds(simTime) - Simulator::Now () - Seconds (0.1));
+    ClientApp.Stop (ns3::Seconds (simTime) - Simulator::Now () - Seconds (0.1));
 
     return includedNode;
   };
 
   /* callback function for node shutdown */
   std::function<void (Ptr<Node>)> shutdownWifiNode = [] (Ptr<Node> exNode) {
-      /* Stop all applications */
-      Ptr<areaSpeedAdvisorClient80211p> areaSpeedAdvisorClient80211p_ = exNode->GetApplication(0)->GetObject<areaSpeedAdvisorClient80211p>();
-      if(areaSpeedAdvisorClient80211p_)
-        areaSpeedAdvisorClient80211p_->StopApplicationNow ();
+    /* Stop all applications */
+    Ptr<areaSpeedAdvisorClient80211p> areaSpeedAdvisorClient80211p_ =
+        exNode->GetApplication (0)->GetObject<areaSpeedAdvisorClient80211p> ();
+    if (areaSpeedAdvisorClient80211p_)
+      areaSpeedAdvisorClient80211p_->StopApplicationNow ();
 
     /* Set position outside communication range */
-    Ptr<ConstantPositionMobilityModel> mob = exNode->GetObject<ConstantPositionMobilityModel> ();
+    Ptr<ConstantPositionMobilityModel> mob = 
+                exNode->GetObject<ConstantPositionMobilityModel> ();
     mob->SetPosition (Vector (-1000.0 + (rand () % 25), 320.0 + (rand () % 25),
                               250.0)); // rand() for visualization purposes
 
@@ -518,68 +584,71 @@ main (int argc, char *argv[])
   fdNet.SetDeviceName ("vethLeft");
   devices = fdNet.Install (nodes.Get (0));
   Ptr<NetDevice> leftFdDev = devices.Get (0);
-  leftFdDev->SetAttribute ("Address", Mac48AddressValue (Mac48Address::Allocate ()));
+  leftFdDev->SetAttribute (
+                "Address", Mac48AddressValue (Mac48Address::Allocate ()));
 
   fdNet.SetDeviceName ("vethRight");
   devices = fdNet.Install (nodes.Get (1));
   Ptr<NetDevice> rightFdDev = devices.Get (0);
-  rightFdDev->SetAttribute ("Address", Mac48AddressValue (Mac48Address::Allocate ()));
+  rightFdDev->SetAttribute (
+                "Address", Mac48AddressValue (Mac48Address::Allocate ()));
 
   fdNet.SetDeviceName ("vethLeft1");
   devices = fdNet.Install (nodes.Get (0));
   Ptr<NetDevice> leftFdDev1 = devices.Get (0);
-  leftFdDev1->SetAttribute ("Address", Mac48AddressValue (Mac48Address::Allocate ()));
+  leftFdDev1->SetAttribute (
+                "Address", Mac48AddressValue (Mac48Address::Allocate ()));
 
   fdNet.SetDeviceName ("vethRight1");
   devices = fdNet.Install (nodes.Get (1));
   Ptr<NetDevice> rightFdDev1 = devices.Get (0);
-  rightFdDev1->SetAttribute ("Address", Mac48AddressValue (Mac48Address::Allocate ()));
+  rightFdDev1->SetAttribute (
+                "Address", Mac48AddressValue (Mac48Address::Allocate ()));
 
-  // we have a FdNetDevices connected to TAP devices through fd,
-  // now install it on nodes and set IP addresses
-  Ptr<Ipv4> ipv4; // get Ipv4 object from node
+  /*
+    we have a FdNetDevices connected to veth devices ,
+    now install it on nodes and set IP addresses
+  */
+  Ptr<Ipv4> ipv4;               // get Ipv4 object from node
   Ipv4InterfaceAddress address; // interface address
-  uint32_t interface; // ifce number
+  uint32_t interface;           // iface number
 
-  // left node (UE)
+  // left node (UE) 1st inface
   ipv4 = nodes.Get (0)->GetObject<Ipv4> ();
   interface = ipv4->AddInterface (leftFdDev1);
-  address = Ipv4InterfaceAddress (Ipv4Address ("15.0.0.1"), Ipv4Mask ("255.0.0.0"));
-  std::cout << "Adress 1: " << address << std::endl;
+  address = Ipv4InterfaceAddress (
+                Ipv4Address ("15.0.0.1"), Ipv4Mask ("255.0.0.0"));
   ipv4->AddAddress (interface, address);
   //ipv4->SetMetric (interface, 1);
   ipv4->SetUp (interface);
 
-  // left node (UE)
+  // left node (UE) 2nd inface 
   ipv4 = nodes.Get (0)->GetObject<Ipv4> ();
   interface = ipv4->AddInterface (leftFdDev);
-  address = Ipv4InterfaceAddress (Ipv4Address ("11.0.0.1"), Ipv4Mask ("255.0.0.0"));
-  std::cout << "Adress 1: " << address << std::endl;
+  address = Ipv4InterfaceAddress (
+                Ipv4Address ("11.0.0.1"), Ipv4Mask ("255.0.0.0"));
   ipv4->AddAddress (interface, address);
-  //ipv4->SetMetric (interface, 1);
   ipv4->SetUp (interface);
 
-  // right node (Remote)
+  // right node (Remote) 1st inface
   ipv4 = nodes.Get (1)->GetObject<Ipv4> ();
   interface = ipv4->AddInterface (rightFdDev1);
-  address = Ipv4InterfaceAddress (Ipv4Address ("14.0.0.1"), Ipv4Mask ("255.0.0.0"));
-  std::cout << "Adress 2: " << address << std::endl;
+  address = Ipv4InterfaceAddress (
+                Ipv4Address ("14.0.0.1"), Ipv4Mask ("255.0.0.0"));
   ipv4->AddAddress (interface, address);
-  //ipv4->SetMetric (interface, 1);
   ipv4->SetUp (interface);
 
-  // right node (Remote)
+  // right node (Remote) 2nd inface 
   ipv4 = nodes.Get (1)->GetObject<Ipv4> ();
   interface = ipv4->AddInterface (rightFdDev);
-  address = Ipv4InterfaceAddress (Ipv4Address ("13.0.0.1"), Ipv4Mask ("255.0.0.0"));
-  std::cout << "Adress 2: " << address << std::endl;
+  address = Ipv4InterfaceAddress (
+                Ipv4Address ("13.0.0.1"), Ipv4Mask ("255.0.0.0"));
   ipv4->AddAddress (interface, address);
-  //ipv4->SetMetric (interface, 1);
   ipv4->SetUp (interface);
 
-  // ****************************************************************************************************************
+  // *************************************************************************
   //                        Configure ROUTING
-  // ****************************************************************************************************************
+  // *************************************************************************
 
   //Adding the network behind the UE and remote host to the AP routing table
   // hardcoding the IP address of the LXC interfaces connected to this path
@@ -590,38 +659,57 @@ main (int argc, char *argv[])
   // *********************************
   Ptr<Ipv4StaticRouting> apStaticRouting =
       ipv4RoutingHelper.GetStaticRouting (nodeAP.Get (0)->GetObject<Ipv4> ());
-  apStaticRouting->AddNetworkRouteTo (Ipv4Address ("15.0.0.0"), Ipv4Mask ("255.0.0.0"),
-                                      Ipv4Address ("16.0.0.2"), ifce_ap_wifi.Get (0).second);
-  apStaticRouting->AddNetworkRouteTo (Ipv4Address ("14.0.0.0"), Ipv4Mask ("255.0.0.0"),
-                                      Ipv4Address ("17.0.0.2"), ifce_ap_csma.Get (0).second);
+  apStaticRouting->AddNetworkRouteTo (
+                Ipv4Address ("15.0.0.0"), Ipv4Mask ("255.0.0.0"),
+                Ipv4Address ("16.0.0.2"), ifce_ap_wifi.Get (0).second);
+  
+  apStaticRouting->AddNetworkRouteTo (
+                Ipv4Address ("11.0.0.0"), Ipv4Mask ("255.0.0.0"),
+                Ipv4Address ("16.0.0.2"), ifce_ap_wifi.Get (0).second);
+  
+  apStaticRouting->AddNetworkRouteTo (
+                Ipv4Address ("14.0.0.0"), Ipv4Mask ("255.0.0.0"),
+                Ipv4Address ("17.0.0.2"), ifce_ap_csma.Get (0).second);
+  
+  apStaticRouting->AddNetworkRouteTo (
+                Ipv4Address ("13.0.0.0"), Ipv4Mask ("255.0.0.0"),
+                Ipv4Address ("17.0.0.2"), ifce_ap_csma.Get (0).second);
 
   // ********************************
   // routing on left node (UE)
   // ********************************
   Ptr<Ipv4StaticRouting> ueStaticRouting =
       ipv4RoutingHelper.GetStaticRouting (nodes.Get (0)->GetObject<Ipv4> ());
+  
   // Set the default gateway for the UE using a static routing
   ueStaticRouting->SetDefaultRoute (epcHelper->GetUeDefaultGatewayAddress (),
                                     ifce_l_lte.Get (0).second);
-  
+
   // add route to right lxc through wifi
-  ueStaticRouting->AddNetworkRouteTo (Ipv4Address ("14.0.0.0"), Ipv4Mask ("255.0.0.0"),
-                                      Ipv4Address ("16.0.0.1"), ifce_l_wifi.Get (0).second);
+  ueStaticRouting->AddNetworkRouteTo (
+                Ipv4Address ("14.0.0.0"), Ipv4Mask ("255.0.0.0"),
+                Ipv4Address ("16.0.0.1"), ifce_l_wifi.Get (0).second);
 
   // ********************************
   // routing on right node (Remote)
   // ********************************
   Ptr<Ipv4StaticRouting> rightStaticRouting =
       ipv4RoutingHelper.GetStaticRouting (nodes.Get (1)->GetObject<Ipv4> ());
+  
   // default route through LTE path
-  rightStaticRouting->SetDefaultRoute (Ipv4Address ("12.0.0.1"), ifce_r_csma1.Get (0).second);
+  rightStaticRouting->SetDefaultRoute (
+                Ipv4Address ("12.0.0.1"), ifce_r_csma1.Get (0).second);
+  
   // add route to left lxc through wifi
-  rightStaticRouting->AddNetworkRouteTo (Ipv4Address ("15.0.0.0"), Ipv4Mask ("255.0.0.0"),
-                                         Ipv4Address ("17.0.0.1"), ifce_r_csma.Get (0).second);
+  rightStaticRouting->AddNetworkRouteTo (
+                Ipv4Address ("15.0.0.0"), Ipv4Mask ("255.0.0.0"),
+                Ipv4Address ("17.0.0.1"), ifce_r_csma.Get (0).second);
+  
   // add route to left lxc through wifi
   // do non need route to 16. just for ping test
-  rightStaticRouting->AddNetworkRouteTo (Ipv4Address ("16.0.0.0"), Ipv4Mask ("255.0.0.0"),
-                                         Ipv4Address ("17.0.0.1"), ifce_r_csma.Get (0).second);
+  rightStaticRouting->AddNetworkRouteTo (
+                Ipv4Address ("16.0.0.0"), Ipv4Mask ("255.0.0.0"),
+                Ipv4Address ("17.0.0.1"), ifce_r_csma.Get (0).second);
 
   // ********************************
   // routing on PGW node
@@ -630,47 +718,23 @@ main (int argc, char *argv[])
   // hardcoding the IP address of the UE connected to the external network
   Ptr<Ipv4StaticRouting> pgwStaticRouting =
       ipv4RoutingHelper.GetStaticRouting (pgw->GetObject<Ipv4> ());
-  pgwStaticRouting->AddNetworkRouteTo (Ipv4Address ("11.0.0.0"), Ipv4Mask ("255.0.0.0"),
-                                       Ipv4Address ("7.0.0.2"), 1);
-  pgwStaticRouting->AddNetworkRouteTo (Ipv4Address ("13.0.0.0"), Ipv4Mask ("255.0.0.0"),
-                                       Ipv4Address ("12.0.0.2"), ifce_pgw_csma.Get (0).second);
+  
+  pgwStaticRouting->AddNetworkRouteTo (
+                Ipv4Address ("11.0.0.0"), Ipv4Mask ("255.0.0.0"),
+                Ipv4Address ("7.0.0.2"), 1);
 
-  // Add LXC left address to allow "ping" through EPC-PGW node
+  pgwStaticRouting->AddNetworkRouteTo (
+                Ipv4Address ("13.0.0.0"), Ipv4Mask ("255.0.0.0"),
+                Ipv4Address ("12.0.0.2"), ifce_pgw_csma.Get (0).second);
+
+  // Add LXC left address to allow connection through LTE network (EPC-PGW)
   addBackAddress (pgw, ueLteDevs.Get (0), Ipv4Address ("11.0.0.2"));
 
-  // ****************************************************************************************************************
+  // **************************************************************************
   //                        Configure APPLICATIONS
-  // ****************************************************************************************************************
-  //
-  // Create the ping application.  This application knows how to send
-  // ICMP echo requests.  Setting up the packet sink manually is a bit
-  // of a hassle and since there is no law that says we cannot mix the
-  // helper API with the low level API, let's just use the helper.
-  //
-  // std::string remote ("14.0.0.2");
-  // std::string mask ("255.0.0.0");
-  // std::string pi ("no");
-  // NS_LOG_INFO ("Create V4Ping Appliation");
-  // TODO:: remove or change
-  // Ipv4Address remoteIp ("14.0.0.2");
-  // Ptr<V4Ping> app = CreateObject<V4Ping> ();
-  // app->SetAttribute ("Remote", Ipv4AddressValue (remoteIp));
-  // app->SetAttribute ("Verbose", BooleanValue (true));
-  // nodes.Get(0)->AddApplication (app);
-  // app->SetStartTime (Seconds (1.0));
-  // app->SetStopTime (Seconds (simTime-1));
-
-  // //
-  // // Give the application a name.  This makes life much easier when constructing
-  // // config paths.
-  // //
-  // Names::Add ("app", app);
-  // //
-  // // Hook a trace to print something when the response comes back.
-  // //
-  // Config::Connect ("/Names/app/Rtt", MakeCallback (&PingRtt));
-
-  //wifiPhy.EnablePcap("mp-v2i",nodes); 
+  // **************************************************************************
+  
+  //wifiPhy.EnablePcap("mp-v2i",nodes);
   //wifiPhy.EnablePcapAll ("mp-wifi", true);
   //csma.EnablePcapAll ("mp-csma", true);
   fdNet.EnablePcapAll ("mp-fd", true);
@@ -682,14 +746,21 @@ main (int argc, char *argv[])
   // realtime jitter calculation :
   // change interval
   // Simulator::Schedule (MilliSeconds(100), &JitterMonitor, realSim);
+  
+  // monitor RF 
+  Config::ConnectWithoutContext(
+                "/NodeList/0/DeviceList/*/Phy/MonitorSnifferRx",
+                MakeCallback (&MonitorSniffRx));
 
-
-  Config::ConnectWithoutContext ("/NodeList/0/DeviceList/*/Phy/MonitorSnifferRx", MakeCallback (&MonitorSniffRx));
-
-  // config output , write config params to file
-  Config::SetDefault ("ns3::ConfigStore::Filename", StringValue ("output-attributes.txt"));
-  Config::SetDefault ("ns3::ConfigStore::FileFormat", StringValue ("RawText"));
-  Config::SetDefault ("ns3::ConfigStore::Mode", StringValue ("Save"));
+  /*
+    config output , write config params to file
+  */ 
+  Config::SetDefault ("ns3::ConfigStore::Filename", 
+                            StringValue ("output-attributes.txt"));
+  Config::SetDefault ("ns3::ConfigStore::FileFormat", 
+                            StringValue ("RawText"));
+  Config::SetDefault ("ns3::ConfigStore::Mode", 
+                            StringValue ("Save"));
   ConfigStore outputConfig;
   outputConfig.ConfigureDefaults ();
   outputConfig.ConfigureAttributes ();

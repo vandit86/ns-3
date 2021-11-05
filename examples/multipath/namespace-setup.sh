@@ -72,13 +72,14 @@ ip netns exec right tc qdisc add dev eth1 root netem delay 20ms
 
 ip netns exec right ip r
 
-if [  -z "$1" ]
-  then
-    echo "argument not  supplied"
+#if [  -z "$1" ]
+#  then
+#    echo "argument not  supplied"
+ 
     #### configure mptcp path manager by iproute2  ###
 
     # Set the per connection and IP address limits to 1 on the server
-    ip netns exec right ip mptcp limits set subflow 1
+    ip netns exec right ip mptcp limits set subflow 5
 
     #Add IP address as a new MPTCP endpoint on the server
     ip netns exec right ip mptcp endpoint add 13.0.0.2 dev eth0 signal
@@ -86,6 +87,9 @@ if [  -z "$1" ]
 
 
     # Set the per connection and IP address limits to 1 on the client
-    ip netns exec left ip mptcp limits set subflow 1 add_addr_accepted 1
-fi
+    ip netns exec left ip mptcp limits set subflow 5 add_addr_accepted 5
+    
+    ## start iperf/ncat server on right node 
+    # ip netns exec left ... /home/vad/mptcp-tools/use_mptcp/use_mptcp.sh iperf3 -s
+#fi
 
