@@ -141,11 +141,11 @@ JitterMonitor (Ptr<RealtimeSimulatorImpl> rt){
   Simulator::Schedule (MilliSeconds (100), &JitterMonitor, rt);
 }
 
-// ****************************************************************************************************************
-// ****************************************************************************************************************
+// *****************************************************************************
+// *****************************************************************************
 //                                      MAIN
-// ****************************************************************************************************************
-// ****************************************************************************************************************
+// *****************************************************************************
+// *****************************************************************************
 int
 main (int argc, char *argv[])
 {
@@ -158,9 +158,9 @@ main (int argc, char *argv[])
   std::string tap_l1 ("tap-left-1");
   std::string tap_r ("tap-right");
   std::string tap_r1 ("tap-right-1");
-  uint64_t path2delay = 10;            // delay between AP and remote host [mks]
+  uint64_t path2delay = 10;         // delay between AP and remote host [mks]
   double path2err = 0.0;            // packet error rate on path 2 
-  double simTime = 60;                // sim time, 1 min by default 
+  double simTime = 60;              // sim time, 1 min by default 
   //
   // Allow the user to override any of the defaults at run-time, via
   // command-line arguments
@@ -184,8 +184,10 @@ main (int argc, char *argv[])
 
   // get pointer to rt simulation impl
   ns3::Ptr<ns3::RealtimeSimulatorImpl> realSim =
-      ns3::DynamicCast<ns3::RealtimeSimulatorImpl> (ns3::Simulator::GetImplementation ());
- 
+      ns3::DynamicCast<ns3::RealtimeSimulatorImpl>(
+                                          ns3::Simulator::GetImplementation ()
+                                          );
+
   // ****************************************
   // Global configurations  
   // ****************************************
@@ -248,16 +250,18 @@ main (int argc, char *argv[])
   mobility.Install (nodes.Get(1));
   mobility.Install (enbNode.Get(0));
 
-  // ****************************************************************************************************************
-  //                                  Configure PATH 1: WI-FI and CSMA 
-  // ****************************************************************************************************************
+  // ***************************************************************************
+  //         Configure PATH 1: WI-FI and CSMA 
+  // ***************************************************************************
 
-  // create default  wifi  channel 
+  /**
+   * create default  wifi  channel, allow pcap traces, create channel
+  */
   wifiChannel = YansWifiChannelHelper::Default ();
-  wifiPhy.SetPcapDataLinkType (WifiPhyHelper::DLT_IEEE802_11_RADIO);  // allow pcap traces 
-  wifiPhy.SetChannel (wifiChannel.Create ());                         // create channel 
+  wifiPhy.SetPcapDataLinkType (WifiPhyHelper::DLT_IEEE802_11_RADIO);   
+  wifiPhy.SetChannel (wifiChannel.Create ());                          
 
-   // Add a mac and Set it to adhoc mode
+  // Add a mac and Set it to adhoc mode
   wifiMac.SetType ("ns3::AdhocWifiMac");
   
   // wifi helper set params 
@@ -273,11 +277,12 @@ main (int argc, char *argv[])
   // Install devices on nodes from path #1
   NetDeviceContainer dev_l_ap = wifi.Install (wifiPhy, wifiMac, nodes_l_ap);
   NetDeviceContainer dev_r_ap = csma.Install (nodes_r_ap);
-  
-  // error model : probability of packet loss in one dev on the path 
-  Ptr<RateErrorModel> em1 = CreateObjectWithAttributes<RateErrorModel> (
-      "ErrorRate", DoubleValue (path2err), "ErrorUnit", EnumValue (RateErrorModel::ERROR_UNIT_PACKET));
-  dev_r_ap.Get (1)->SetAttribute ("ReceiveErrorModel", PointerValue (em1)); 
+
+  // error model : probability of packet loss in one dev on the path
+  Ptr<RateErrorModel> em1 =
+      CreateObjectWithAttributes<RateErrorModel> ("ErrorRate", DoubleValue (path2err), "ErrorUnit",
+                                                  EnumValue (RateErrorModel::ERROR_UNIT_PACKET));
+  dev_r_ap.Get (1)->SetAttribute ("ReceiveErrorModel", PointerValue (em1));
   // dev_r_ap.Get (0)->SetAttribute ("ReceiveErrorModel", PointerValue (em1));
 
   // Assign adress 

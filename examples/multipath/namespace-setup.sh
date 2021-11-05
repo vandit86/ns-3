@@ -49,7 +49,7 @@ ip netns exec left ip route add 13.0.0.0/8 via 11.0.0.1 dev eth0
 ip netns exec left ethtool --offload  eth0  rx off  tx off
 ip netns exec left ethtool --offload  eth1  rx off  tx off
 
-ip netns exec left ip a
+ip netns exec left ip r
 
 #### config right ####
 ip netns exec right ip addr add 13.0.0.2/8 dev eth0
@@ -70,18 +70,22 @@ ip netns exec right ethtool --offload  eth1  rx off  tx off
 ip netns exec right tc qdisc add dev eth0 root netem delay 55ms
 ip netns exec right tc qdisc add dev eth1 root netem delay 20ms
 
-ip netns exec right ip a
+ip netns exec right ip r
+
+if [  -z "$1" ]
+  then
+    echo "argument not  supplied"
+    #### configure mptcp path manager by iproute2  ###
+
+    # Set the per connection and IP address limits to 1 on the server
+    ip netns exec right ip mptcp limits set subflow 1
+
+    #Add IP address as a new MPTCP endpoint on the server
+    ip netns exec right ip mptcp endpoint add 13.0.0.2 dev eth0 signal
+    ip netns exec right ip mptcp endpoint add 14.0.0.2 dev eth1 signal
 
 
-#### configure mptcp path manager by iproute2  ###
+    # Set the per connection and IP address limits to 1 on the client
+    ip netns exec left ip mptcp limits set subflow 1 add_addr_accepted 1
+fi
 
-# Set the per connection and IP address limits to 1 on the server
-ip netns exec right ip mptcp limits set subflow 1
-
-#Add IP address as a new MPTCP endpoint on the server
-ip netns exec right ip mptcp endpoint add 13.0.0.2 dev eth0 signal
-ip netns exec right ip mptcp endpoint add 14.0.0.2 dev eth1 signal
-
-
-# Set the per connection and IP address limits to 1 on the client
-ip netns exec left ip mptcp limits set subflow 1 add_addr_accepted 1
