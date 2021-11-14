@@ -43,6 +43,10 @@
 #include "ns3/PRRSupervisor.h"
 #include <unistd.h>
 
+// interact with mptcpd-plugin 
+#include "/home/vad/mptcpd-0.8/include/mptcpd/mptcp_ns3.h"
+#include <fcntl.h>
+
 using namespace ns3;
 /* we run in real-time , so no loggin is avilable  */
 //NS_LOG_COMPONENT_DEFINE ("MpFdExample");
@@ -147,8 +151,9 @@ getNumberVeh (std::string path)
    * of its size.
    */
 void
-MonitorSniffRx (Ptr<const Packet> packet, uint16_t channelFreqMhz, WifiTxVector txVector,
-                MpduInfo aMpdu, SignalNoiseDbm signalNoise, uint16_t staId)
+MonitorSniffRx (Ptr<const Packet> packet, uint16_t channelFreqMhz, 
+                WifiTxVector txVector, MpduInfo aMpdu, 
+                SignalNoiseDbm signalNoise, uint16_t staId)
 
 {
   // g_samples++;
@@ -170,6 +175,41 @@ MonitorSniffRx (Ptr<const Packet> packet, uint16_t channelFreqMhz, WifiTxVector 
   // }
 }
 
+/**
+ * @brief connect to mptcpd-plugin path manager, requires
+ * 
+ * @param fd file descriptor of named pipe (FIFO) used to communicate with 
+ * our mptcpd-plugin 
+ */
+void
+mptcpdConnection (int& fd)
+{
+    std::cout << " FD :" << fd << std::endl;  
+    // prepare msg for exit listening thread
+    struct sspi_ns3_message msg = {.type = SSPI_NEW, .value = 0};
+    
+    /*  
+        open in write mode, non blocking (O_NDELAY)
+        This will cause open() to return -1 
+        if there are no processes that have the file open for reading.
+    */
+    fd = open (SSPI_FIFO_PATH, O_WRONLY, O_NDELAY);
+    
+    // no thread are listing : try again later, or exit ?? 
+    if (fd < 0){
+        std::cout << "No process to read from file: " 
+                    << SSPI_FIFO_PATH << std::endl;  
+        return;
+    }
+    size_t len = sizeof (msg);
+    int num = write (fd, &msg, len);
+    if (num < 0){
+        std::cout << "Error write to mptcpd  \n";
+    }
+    std::cout << " FD :" << fd << std::endl;  
+    close (fd);
+}
+
 // ***************************************************************************
 // ***************************************************************************
 //                                      MAIN
@@ -186,6 +226,8 @@ main (int argc, char *argv[])
   bool sumo_gui = false;
   double sumo_updates = 0.01;   // sumo update rate 
   std::string csv_name;
+
+  int mptcpd_fd = -1 ;          // file desc to connect to mptcpd plugin
 
   // Disabling this option turns off the whole V2X application
   // (useful for comparing the situation when the application is enabled and the one in which it is disabled)
@@ -466,6 +508,7 @@ main (int argc, char *argv[])
   sumoClient->SetAttribute ("SumoStepLog", BooleanValue (false));
   sumoClient->SetAttribute ("SumoSeed", IntegerValue (10));
 
+    // SUMO options on start 
   std::string sumo_additional_options = "--verbose true \
                             --collision.action warn \
                             --collision.check-junctions \
@@ -747,6 +790,9 @@ main (int argc, char *argv[])
   // change interval
   // Simulator::Schedule (MilliSeconds(100), &JitterMonitor, realSim);
   
+  // Start communicate with MPTCPD Path manager 
+  Simulator::Schedule (MilliSeconds(1000),  &mptcpdConnection, mptcpd_fd); 
+
   // monitor RF 
   Config::ConnectWithoutContext(
                 "/NodeList/0/DeviceList/*/Phy/MonitorSnifferRx",
