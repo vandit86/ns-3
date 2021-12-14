@@ -51,6 +51,14 @@ using namespace ns3;
 /* we run in real-time , so no loggin is avilable  */
 //NS_LOG_COMPONENT_DEFINE ("MpFdExample");
 
+// Global variables for use in callbacks.
+double g_signalDbmAvg;
+double g_noiseDbmAvg;
+uint32_t g_samples;
+bool sspi_backup; 
+
+int mptcpdFd;                  
+
 /**
    * Set the address of a previously added UE
    * \brief  we need to add the address of namespace device connected through 
@@ -130,6 +138,44 @@ getNumberVeh (std::string path)
 }
 
 /**
+ * @brief write to mptcpd-plugin path manager, requires sudo ? 
+ * 
+ * @param fd file descriptor of named pipe (FIFO) used to communicate with 
+ * our mptcpd-plugin 
+ */
+void
+mptcpdWrite (struct sspi_ns3_message msg)
+{ 
+    // prepare msg for exit listening thread
+       
+    /*  
+        open in write mode, non blocking (O_NDELAY)
+        This will cause open() to return -1 
+        if there are no processes that have the file open for reading.
+        Note: we should run ns3 with sudo , since netns run under root
+        and permitions of pipe
+    */
+    // std::cout << "fd = " << mptcpdFd<< std::endl ;
+    if (mptcpdFd < 0 ){
+        std::cout << "NEW connection to mptcpd" << std::endl; 
+        mptcpdFd = open (SSPI_FIFO_PATH, O_WRONLY, O_NDELAY);
+    } 
+    
+    // no thread are listing : try again later, or exit ?? 
+    if (mptcpdFd < 0){
+        std::cout << "unable to open pipe: " 
+                    << SSPI_FIFO_PATH << std::endl;  
+    }
+    else {
+      int num = write (mptcpdFd, &msg, sizeof (msg));
+      if (num < 0){
+          std::cout << "Error write to mptcpd pipe \n";
+          mptcpdFd = -1 ; 
+      }
+    }
+}
+
+/**
    * \brief TracedCallback signature for monitor mode receive events.
    *
    * \param packet the packet being received
@@ -151,64 +197,49 @@ getNumberVeh (std::string path)
    * of its size.
    */
 void
-MonitorSniffRx (Ptr<const Packet> packet, uint16_t channelFreqMhz, 
-                WifiTxVector txVector, MpduInfo aMpdu, 
-                SignalNoiseDbm signalNoise, uint16_t staId)
+MonitorSniffRx (Ptr<const Packet> packet, uint16_t channelFreqMhz, WifiTxVector txVector,
+                MpduInfo aMpdu, SignalNoiseDbm signalNoise, uint16_t staId)
 
 {
-  // g_samples++;
-  // g_signalDbmAvg += ((signalNoise.signal - g_signalDbmAvg) / g_samples);
-  // g_noiseDbmAvg += ((signalNoise.noise - g_noiseDbmAvg) / g_samples);
+  //   g_samples++;
+  //   g_signalDbmAvg += ((signalNoise.signal - g_signalDbmAvg) / g_samples);
+  //   g_noiseDbmAvg += ((signalNoise.noise - g_noiseDbmAvg) / g_samples);
 
-  // staId == 65535
-  // channelFreqMhz ==  5860
+  // //   staId == 65535
+  // //   channelFreqMhz ==  5860
 
-  // std::cout << Simulator::Now().GetSeconds()  <<"\t" << signalNoise.signal
-  //                                             <<"\t" << signalNoise.noise
-  //                                             << std::endl ;
-  // Ipv4Header ipv4H ;
+  //   std::cout << Simulator::Now().GetSeconds()  <<"\t" << signalNoise.signal
+  //                                               <<"\t" << signalNoise.noise
+  //                                               << std::endl ;
+  
+  // 34.5908	-81.7451	-96.9763
+  // send backup flag (initially sspi:backup = false)
+  if (signalNoise.signal < (-75) && !sspi_backup)
+    {
+      std::cout << Simulator::Now().GetSeconds(); 
+      std::cout << " Send BAckup 1" << std :: endl ; 
+      struct sspi_ns3_message msg = {.type = SSPI_CMD_FLAG, .value = 1};
+      mptcpdWrite (msg);
+      sspi_backup = true; 
+    }
+  else if (signalNoise.signal > (-75) && sspi_backup)
+    {
+      std::cout << Simulator::Now().GetSeconds();
+      std::cout << " Send BAckup 0" << std :: endl ; 
+      struct sspi_ns3_message msg = {.type = SSPI_CMD_FLAG, .value = 0};
+      mptcpdWrite (msg);
+      sspi_backup = false;
+    }
+  //   Ipv4Header ipv4H ;
 
-  // WifiMacHeader wifiH;
-  // if (uint32_t num = packet->PeekHeader(wifiH)){
-  //   std::cout<< "num : "<<num << "\ta1:"<<  wifiH.GetAddr1() 
-                // << "\ta2:"<<  wifiH.GetAddr2() << std::endl;
-  // }
+  //   WifiMacHeader wifiH;
+  //   if (uint32_t num = packet->PeekHeader(wifiH)){
+  //     std::cout<< "num : "<<num << "\ta1:"<<  wifiH.GetAddr1()
+  //                 << "\ta2:"<<  wifiH.GetAddr2() << std::endl;
+  //   }
 }
 
-/**
- * @brief connect to mptcpd-plugin path manager, requires
- * 
- * @param fd file descriptor of named pipe (FIFO) used to communicate with 
- * our mptcpd-plugin 
- */
-void
-mptcpdConnection (int& fd)
-{
-    std::cout << " FD :" << fd << std::endl;  
-    // prepare msg for exit listening thread
-    struct sspi_ns3_message msg = {.type = SSPI_NEW, .value = 0};
-    
-    /*  
-        open in write mode, non blocking (O_NDELAY)
-        This will cause open() to return -1 
-        if there are no processes that have the file open for reading.
-    */
-    fd = open (SSPI_FIFO_PATH, O_WRONLY, O_NDELAY);
-    
-    // no thread are listing : try again later, or exit ?? 
-    if (fd < 0){
-        std::cout << "No process to read from file: " 
-                    << SSPI_FIFO_PATH << std::endl;  
-        return;
-    }
-    size_t len = sizeof (msg);
-    int num = write (fd, &msg, len);
-    if (num < 0){
-        std::cout << "Error write to mptcpd  \n";
-    }
-    std::cout << " FD :" << fd << std::endl;  
-    close (fd);
-}
+
 
 // ***************************************************************************
 // ***************************************************************************
@@ -227,10 +258,12 @@ main (int argc, char *argv[])
   double sumo_updates = 0.01;   // sumo update rate 
   std::string csv_name;
 
-  int mptcpd_fd = -1 ;          // file desc to connect to mptcpd plugin
+  mptcpdFd = -1 ;          // file desc to connect to mptcpd plugin
+  sspi_backup = false;    // wifi not in backup 
 
   // Disabling this option turns off the whole V2X application
-  // (useful for comparing the situation when the application is enabled and the one in which it is disabled)
+  // (useful for comparing the situation when the application is enabled and 
+  // the one in which it is disabled)
   bool send_cam = true;
   double m_baseline_prr = 150.0;
   bool m_prr_sup = false;
@@ -407,16 +440,25 @@ main (int argc, char *argv[])
                         UintegerValue (100)); // 5MHz,  100 for 20MHz bandwidth
   Config::SetDefault ("ns3::LteEnbNetDevice::DlBandwidth", 
                         UintegerValue (100)); //20MHz bandwidth
+//   bool useCa = true; 
+//   if (useCa)
+//     {
+//       Config::SetDefault ("ns3::LteHelper::UseCa", BooleanValue (useCa));
+//       Config::SetDefault ("ns3::LteHelper::NumberOfComponentCarriers",
+//                                         UintegerValue (2));
+//       Config::SetDefault ("ns3::LteHelper::EnbComponentCarrierManager",
+//                           StringValue ("ns3::RrComponentCarrierManager"));
+//     }
 
-//   testing
+// //   testing
 //   Config::SetDefault ("ns3::CcHelper::DlBandwidth",  
 //                  UintegerValue (100)); // 5MHz,  100 for 20MHz bandwidth
 //   Config::SetDefault ("ns3::ComponentCarrier::DlBandwidth", 
 //                  UintegerValue (100)); // 5MHz,  100 for 20MHz bandwidth
 
-    // Adaptive Modulation and Coding
-  Config::SetDefault ("ns3::LteAmc::AmcModel",
-                        EnumValue (LteAmc::PiroEW2010)); 
+//     // Adaptive Modulation and Coding
+//   Config::SetDefault ("ns3::LteAmc::AmcModel",
+//                         EnumValue (LteAmc::PiroEW2010)); 
 
   // get LTE / EPC helpers
   Ptr<LteHelper> lteHelper = CreateObject<LteHelper> ();
@@ -791,7 +833,14 @@ main (int argc, char *argv[])
   // Simulator::Schedule (MilliSeconds(100), &JitterMonitor, realSim);
   
   // Start communicate with MPTCPD Path manager 
-  Simulator::Schedule (MilliSeconds(1000),  &mptcpdConnection, mptcpd_fd); 
+  struct sspi_ns3_message sspi_msg = 
+            {.type = SSPI_CMD_TEST, .value = 0};
+  Simulator::Schedule (MilliSeconds(1000),  &mptcpdWrite, sspi_msg);
+
+  // 30 sec of MPTC session 
+  sspi_msg = {.type = SSPI_CMD_IPERF_START, .value = 30};
+  Simulator::Schedule (MilliSeconds(10000),  &mptcpdWrite, sspi_msg);
+   
 
   // monitor RF 
   Config::ConnectWithoutContext(

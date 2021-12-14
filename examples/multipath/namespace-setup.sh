@@ -1,5 +1,8 @@
 #!/bin/sh
-# Start LXC containers 
+# Start LXC containers
+
+# delete all namespaces at ones 
+# sudo ip -all netns delete
 
 # add namespaces 
 ip netns add left
@@ -43,13 +46,15 @@ ip netns exec left ip link set dev eth1 up
 
 ip netns exec left ip route add 14.0.0.0/8 via 15.0.0.1 dev eth1
 ip netns exec left ip route add 13.0.0.0/8 via 11.0.0.1 dev eth0
-# ip route add default via 10.0.1.1 dev H1-eth0
+# additional route to server with different metric
+# ip netns exec left ip route add 13.0.0.0/8 via 15.0.0.1 dev eth1 metric 100 
+# ip route add default via 10.0.1.1 dev eth0
 
 # disable checksum tcp
 ip netns exec left ethtool --offload  eth0  rx off  tx off
 ip netns exec left ethtool --offload  eth1  rx off  tx off
 
-ip netns exec left ip r
+#ip netns exec left ip r
 
 #### config right ####
 ip netns exec right ip addr add 13.0.0.2/8 dev eth0
@@ -70,26 +75,23 @@ ip netns exec right ethtool --offload  eth1  rx off  tx off
 ip netns exec right tc qdisc add dev eth0 root netem delay 55ms
 ip netns exec right tc qdisc add dev eth1 root netem delay 20ms
 
-ip netns exec right ip r
+# *********************************************** # 
+#    configure mptcp path manager by iproute2     #
+# *********************************************** # 
 
-#if [  -z "$1" ]
-#  then
-#    echo "argument not  supplied"
- 
-    #### configure mptcp path manager by iproute2  ###
+# Set the per connection and IP address limits  
+ip netns exec right ip mptcp limits set subflow 3 add_addr_accepted 3
+ip netns exec left ip mptcp limits set subflow 3 add_addr_accepted 3
 
-    # Set the per connection and IP address limits to 1 on the server
-    ip netns exec right ip mptcp limits set subflow 5
-
-    #Add IP address as a new MPTCP endpoint on the server
-    ip netns exec right ip mptcp endpoint add 13.0.0.2 dev eth0 signal
-    ip netns exec right ip mptcp endpoint add 14.0.0.2 dev eth1 signal
+# Add IP address as a new MPTCP endpoint on the server
+# Server sends ADD_ADDR 
+ip netns exec right ip mptcp endpoint add 13.0.0.2 dev eth0 id 1 signal
+ip netns exec right ip mptcp endpoint add 14.0.0.2 dev eth1 id 2 signal
 
 
-    # Set the per connection and IP address limits to 1 on the client
-    ip netns exec left ip mptcp limits set subflow 5 add_addr_accepted 5
+# Just define endpoint for client (UE)
+ip netns exec left ip mptcp endpoint add 11.0.0.2 dev eth0 id 1  
+ip netns exec left ip mptcp endpoint add 15.0.0.2 dev eth1 id 2  
     
-    ## start iperf/ncat server on right node 
-    # ip netns exec left ... /home/vad/mptcp-tools/use_mptcp/use_mptcp.sh iperf3 -s
-#fi
-
+## start iperf/ncat server on right node 
+ip netns exec right /home/vad/mptcp-tools/use_mptcp/use_mptcp.sh iperf -s -D
