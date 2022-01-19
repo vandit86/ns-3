@@ -221,7 +221,8 @@ MonitorSniffRx (Ptr<const Packet> packet, uint16_t channelFreqMhz, WifiTxVector 
     {
       std::cout << Simulator::Now().GetSeconds(); 
       std::cout << " Send BAckup 1" << std :: endl ; 
-      struct sspi_ns3_message msg = {.type = SSPI_CMD_FLAG, .value = 1};
+      struct sspi_ns3_message msg = {.type = SSPI_CMD_BACKUP_FLAG_ON, 
+                                    .value = 2}; // on 2nd endpoint
       mptcpdWrite (msg);
       sspi_backup = true; 
     }
@@ -229,7 +230,8 @@ MonitorSniffRx (Ptr<const Packet> packet, uint16_t channelFreqMhz, WifiTxVector 
     {
       std::cout << Simulator::Now().GetSeconds();
       std::cout << " Send BAckup 0" << std :: endl ; 
-      struct sspi_ns3_message msg = {.type = SSPI_CMD_FLAG, .value = 0};
+      struct sspi_ns3_message msg = {.type =  SSPI_CMD_CLEAR_FLAGS, 
+                                    .value = 2}; // on seconf endpoint 
       mptcpdWrite (msg);
       sspi_backup = false;
     }
