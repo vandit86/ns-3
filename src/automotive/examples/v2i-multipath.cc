@@ -57,7 +57,7 @@ double g_noiseDbmAvg;
 uint32_t g_samples;
 bool sspi_backup; 
 
-int mptcpdFd;                  
+int mptcpdFd;      // file descriptor to interact with mptcpd             
 
 /**
    * Set the address of a previously added UE
@@ -214,7 +214,10 @@ MonitorSniffRx (Ptr<const Packet> packet, uint16_t channelFreqMhz, WifiTxVector 
   
   // 34.5908	-81.7451	-96.9763
   // send backup flag (initially sspi:backup = false)
-  if (signalNoise.signal < (-75) && !sspi_backup)
+
+  double RSSI_T = -75; // RSSI Threashold value 
+  
+  if (signalNoise.signal < (RSSI_T) && !sspi_backup)
     {
       std::cout << Simulator::Now().GetSeconds(); 
       std::cout << " Send BAckup 1" << std :: endl ; 
@@ -222,7 +225,7 @@ MonitorSniffRx (Ptr<const Packet> packet, uint16_t channelFreqMhz, WifiTxVector 
       mptcpdWrite (msg);
       sspi_backup = true; 
     }
-  else if (signalNoise.signal > (-75) && sspi_backup)
+  else if (signalNoise.signal > (RSSI_T) && sspi_backup)
     {
       std::cout << Simulator::Now().GetSeconds();
       std::cout << " Send BAckup 0" << std :: endl ; 
@@ -258,8 +261,11 @@ main (int argc, char *argv[])
   double sumo_updates = 0.01;   // sumo update rate 
   std::string csv_name;
 
-  mptcpdFd = -1 ;          // file desc to connect to mptcpd plugin
-  sspi_backup = false;    // wifi not in backup 
+  /* MPTCP NETLINK PATH MANAGER */
+  bool use_mptcp_pm = false ;     // use mptcpd path manager or not
+  int iperf_session = 0;      // start iperf session time is sec  
+  mptcpdFd = -1 ;             // file desc to connect to mptcpd plugin
+  sspi_backup = false;        // wifi not in backup 
 
   // Disabling this option turns off the whole V2X application
   // (useful for comparing the situation when the application is enabled and 
@@ -280,6 +286,13 @@ main (int argc, char *argv[])
   CommandLine cmd (__FILE__);
   cmd.AddValue ("simTime", "Total duration of the simulation [s])", simTime);
   cmd.AddValue ("sumo-gui", "Use SUMO gui or not", sumo_gui);
+  cmd.AddValue ("use-mptcpd", 
+                        "Use or not netlink MPTCP Path manager", use_mptcp_pm); 
+  cmd.AddValue ("iperf", 
+                        "Send CMD to Start iperf session on namespace for x sec", 
+                        iperf_session); 
+  
+  
   // cmd.AddValue ("sumo-folder","Position of sumo config files",sumo_folder);
   // cmd.AddValue ("mob-trace", "Name of the mobility trace file", mob_trace);
   // cmd.AddValue ("sumo-config", "Location and name of SUMO configuration file, 
@@ -832,24 +845,32 @@ main (int argc, char *argv[])
   // change interval
   // Simulator::Schedule (MilliSeconds(100), &JitterMonitor, realSim);
   
-  // Start communicate with MPTCPD Path manager 
-  struct sspi_ns3_message sspi_msg = 
-            {.type = SSPI_CMD_TEST, .value = 0};
-  Simulator::Schedule (MilliSeconds(1000),  &mptcpdWrite, sspi_msg);
+  // send test msg ---> Check connection, Start TcpDump recording 
+  struct sspi_ns3_message sspi_msg = {.type = SSPI_CMD_TEST, 
+                                      .value = (int)simTime };
+  Simulator::Schedule (MilliSeconds (500), &mptcpdWrite, sspi_msg);
 
-  // 30 sec of MPTC session 
-  sspi_msg = {.type = SSPI_CMD_IPERF_START, .value = 30};
-  Simulator::Schedule (MilliSeconds(10000),  &mptcpdWrite, sspi_msg);
-   
+  // Start communicate with MPTCPD Path manager
+  if (use_mptcp_pm){
 
-  // monitor RF 
-  Config::ConnectWithoutContext(
-                "/NodeList/0/DeviceList/*/Phy/MonitorSnifferRx",
-                MakeCallback (&MonitorSniffRx));
+      // monitor 802.11p RF metrics for each received pack
+      // and sends commands  
+      Config::ConnectWithoutContext (
+                  "/NodeList/0/DeviceList/*/Phy/MonitorSnifferRx",
+                                     MakeCallback (&MonitorSniffRx));
+  }
+
+  if (iperf_session)
+    {
+      // start 30 sec of iperf MPTCP session after 10 sec of simulation
+      struct sspi_ns3_message sspi_msg = {.type = SSPI_CMD_IPERF_START, 
+                                          .value = iperf_session};
+      Simulator::Schedule (MilliSeconds (10000), &mptcpdWrite, sspi_msg);
+    }
 
   /*
     config output , write config params to file
-  */ 
+  */
   Config::SetDefault ("ns3::ConfigStore::Filename", 
                             StringValue ("output-attributes.txt"));
   Config::SetDefault ("ns3::ConfigStore::FileFormat", 
