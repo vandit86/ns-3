@@ -55,7 +55,14 @@ using namespace ns3;
 double g_signalDbmAvg;
 double g_noiseDbmAvg;
 uint32_t g_samples;
-bool sspi_backup; 
+
+/** NS-3 connection glob vars **/
+
+/* we need to save information about iface connection state (in backup or not)
+    index of array represents endpoint num (support only 2 inaces) 
+    size = num ifaces + 1 
+*/
+bool sspi_iface_backup[3] = {false};
 
 int mptcpdFd;      // file descriptor to interact with mptcpd             
 
@@ -176,6 +183,36 @@ mptcpdWrite (struct sspi_ns3_message msg)
 }
 
 /**
+ * @brief Set the endpoin to backup flag 
+ * 
+ * @param id ID of the endpoint  
+ */
+void
+set_endpoin_backup (int id)
+{
+  std::cout << Simulator::Now ().GetSeconds () 
+            << " Send Backup endpoint " << id << std ::endl;
+  struct sspi_ns3_message msg = {.type = SSPI_CMD_BACKUP_FLAG_ON,
+                                 .value = id}; // on 2nd end
+  mptcpdWrite (msg);
+  sspi_iface_backup[id] = true;
+}
+
+/**
+ * @brief Clear all flags for endpoint 
+ * 
+ * @param id ID of the endpoint 
+ */
+void 
+clear_endpoint_falgs (int id){
+  std::cout << Simulator::Now ().GetSeconds () 
+            << " Clear flags endpoint " << id << std ::endl;
+  struct sspi_ns3_message msg = {.type = SSPI_CMD_CLEAR_FLAGS, 
+                                .value = id}; 
+  mptcpdWrite (msg);
+  sspi_iface_backup[id] = false;
+}
+/**
    * \brief TracedCallback signature for monitor mode receive events.
    *
    * \param packet the packet being received
@@ -215,25 +252,23 @@ MonitorSniffRx (Ptr<const Packet> packet, uint16_t channelFreqMhz, WifiTxVector 
   // 34.5908	-81.7451	-96.9763
   // send backup flag (initially sspi:backup = false)
 
-  double RSSI_T = -75; // RSSI Threashold value 
-  
-  if (signalNoise.signal < (RSSI_T) && !sspi_backup)
+  // LPF
+  double RSSI_T = -75; // RSSI Threashold value
+  //.....
+  if (signalNoise.signal < (RSSI_T) && !sspi_iface_backup[SSPI_IFACE_WLAN])
     {
-      std::cout << Simulator::Now().GetSeconds(); 
-      std::cout << " Send BAckup 1" << std :: endl ; 
-      struct sspi_ns3_message msg = {.type = SSPI_CMD_BACKUP_FLAG_ON, 
-                                    .value = 2}; // on 2nd endpoint
-      mptcpdWrite (msg);
-      sspi_backup = true; 
+
+      // check if lte is in backup mode, if so cleaf flags on LTE iface
+      if (sspi_iface_backup[SSPI_IFACE_LTE])
+        {
+          clear_endpoint_falgs (SSPI_IFACE_LTE);
+          return;
+        }
+      set_endpoin_backup (SSPI_IFACE_WLAN);
     }
-  else if (signalNoise.signal > (RSSI_T) && sspi_backup)
+  else if (signalNoise.signal > (RSSI_T) && sspi_iface_backup[SSPI_IFACE_WLAN])
     {
-      std::cout << Simulator::Now().GetSeconds();
-      std::cout << " Send BAckup 0" << std :: endl ; 
-      struct sspi_ns3_message msg = {.type =  SSPI_CMD_CLEAR_FLAGS, 
-                                    .value = 2}; // on seconf endpoint 
-      mptcpdWrite (msg);
-      sspi_backup = false;
+      clear_endpoint_falgs (SSPI_IFACE_WLAN);
     }
   //   Ipv4Header ipv4H ;
 
@@ -243,8 +278,6 @@ MonitorSniffRx (Ptr<const Packet> packet, uint16_t channelFreqMhz, WifiTxVector 
   //                 << "\ta2:"<<  wifiH.GetAddr2() << std::endl;
   //   }
 }
-
-
 
 // ***************************************************************************
 // ***************************************************************************
@@ -267,8 +300,7 @@ main (int argc, char *argv[])
   bool use_mptcp_pm = false ;     // use mptcpd path manager or not
   int iperf_session = 0;      // start iperf session time is sec  
   mptcpdFd = -1 ;             // file desc to connect to mptcpd plugin
-  sspi_backup = false;        // wifi not in backup 
-
+  
   // Disabling this option turns off the whole V2X application
   // (useful for comparing the situation when the application is enabled and 
   // the one in which it is disabled)
@@ -868,11 +900,16 @@ main (int argc, char *argv[])
 
   if (iperf_session)
     {
+       uint64_t start_time = 10 ;  
       // start iperf MPTCP session after 10 sec of simulation
       // session duration is defined in iperf_session variable
       struct sspi_ns3_message sspi_msg = {.type = SSPI_CMD_IPERF_START, 
                                           .value = iperf_session};
-      Simulator::Schedule (MilliSeconds (10000), &mptcpdWrite, sspi_msg);
+      Simulator::Schedule (Seconds(start_time), &mptcpdWrite, sspi_msg);
+      
+      // set LTE endpoint to backup at start of iperf session
+    //   Simulator::Schedule (Seconds (start_time+3), 
+    //                         &set_endpoin_backup, SSPI_IFACE_LTE);
     }
 
   /*
