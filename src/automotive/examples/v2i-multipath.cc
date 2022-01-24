@@ -834,37 +834,42 @@ main (int argc, char *argv[])
   //                        Configure APPLICATIONS
   // **************************************************************************
   
-  //wifiPhy.EnablePcap("mp-v2i",nodes);
-  //wifiPhy.EnablePcapAll ("mp-wifi", true);
-  //csma.EnablePcapAll ("mp-csma", true);
-  fdNet.EnablePcapAll ("mp-fd", true);
 
   // ********************************************************
   // Debug: Testing that proper IP addresses are configured
   // ********************************************************
+  // wifiPhy.EnablePcap("mp-v2i",nodes);
+  // wifiPhy.EnablePcapAll ("mp-wifi", true);
+  // csma.EnablePcapAll ("mp-csma", true);
+  // fdNet.EnablePcapAll ("mp-fd", true);
 
   // realtime jitter calculation :
   // change interval
   // Simulator::Schedule (MilliSeconds(100), &JitterMonitor, realSim);
   
-  // send test msg ---> Check connection, Start TcpDump recording 
+
+  // ********************************************************
+  // MPTCPD: Interaction with MPTCPD Path manager
+  // ********************************************************
+  
+  // send TEST msg ---> Check connection, Start TcpDump recording 
   struct sspi_ns3_message sspi_msg = {.type = SSPI_CMD_TEST, 
                                       .value = (int)simTime };
   Simulator::Schedule (MilliSeconds (500), &mptcpdWrite, sspi_msg);
 
-  // Start communicate with MPTCPD Path manager
-  if (use_mptcp_pm){
-
+  if (use_mptcp_pm)
+    {
       // monitor 802.11p RF metrics for each received pack
-      // and sends commands  
+      // and sends commands to set BACKUP flag  
       Config::ConnectWithoutContext (
                   "/NodeList/0/DeviceList/*/Phy/MonitorSnifferRx",
                                      MakeCallback (&MonitorSniffRx));
-  }
+    }
 
   if (iperf_session)
     {
-      // start 30 sec of iperf MPTCP session after 10 sec of simulation
+      // start iperf MPTCP session after 10 sec of simulation
+      // session duration is defined in iperf_session variable
       struct sspi_ns3_message sspi_msg = {.type = SSPI_CMD_IPERF_START, 
                                           .value = iperf_session};
       Simulator::Schedule (MilliSeconds (10000), &mptcpdWrite, sspi_msg);
@@ -874,11 +879,11 @@ main (int argc, char *argv[])
     config output , write config params to file
   */
   Config::SetDefault ("ns3::ConfigStore::Filename", 
-                            StringValue ("output-attributes.txt"));
+                                      StringValue ("output-attributes.txt"));
   Config::SetDefault ("ns3::ConfigStore::FileFormat", 
-                            StringValue ("RawText"));
+                                      StringValue ("RawText"));
   Config::SetDefault ("ns3::ConfigStore::Mode", 
-                            StringValue ("Save"));
+                                      StringValue ("Save"));
   ConfigStore outputConfig;
   outputConfig.ConfigureDefaults ();
   outputConfig.ConfigureAttributes ();
