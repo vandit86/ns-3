@@ -52,9 +52,11 @@ using namespace ns3;
 //NS_LOG_COMPONENT_DEFINE ("MpFdExample");
 
 // Global variables for use in callbacks.
-double g_signalDbmAvg;
-double g_noiseDbmAvg;
-uint32_t g_samples;
+double g_signalDbm;
+//double g_noiseDbmAvg;
+//uint32_t g_samples;
+
+
 
 /** NS-3 connection glob vars **/
 
@@ -252,13 +254,15 @@ MonitorSniffRx (Ptr<const Packet> packet, uint16_t channelFreqMhz, WifiTxVector 
   // 34.5908	-81.7451	-96.9763
   // send backup flag (initially sspi:backup = false)
 
-  // LPF
+  // SIMPLE LPF  α * x[i] + (1-α) * y[i-1]
   double RSSI_T = -75; // RSSI Threashold value
-  //.....
-  if (signalNoise.signal < (RSSI_T) && !sspi_iface_backup[SSPI_IFACE_WLAN])
+  double alpha = 0.75; // alpha value 
+  g_signalDbm = alpha * signalNoise.signal + (1-alpha)*g_signalDbm; 
+  
+  //CHACKING SIGNAL RSSI VALUE 
+  if (g_signalDbm < (RSSI_T) && !sspi_iface_backup[SSPI_IFACE_WLAN])
     {
-
-      // check if lte is in backup mode, if so cleaf flags on LTE iface
+      // check if lte is in backup mode, if so clean flags on LTE iface
       if (sspi_iface_backup[SSPI_IFACE_LTE])
         {
           clear_endpoint_falgs (SSPI_IFACE_LTE);
@@ -266,7 +270,7 @@ MonitorSniffRx (Ptr<const Packet> packet, uint16_t channelFreqMhz, WifiTxVector 
         }
       set_endpoin_backup (SSPI_IFACE_WLAN);
     }
-  else if (signalNoise.signal > (RSSI_T) && sspi_iface_backup[SSPI_IFACE_WLAN])
+  else if (g_signalDbm > (RSSI_T) && sspi_iface_backup[SSPI_IFACE_WLAN])
     {
       clear_endpoint_falgs (SSPI_IFACE_WLAN);
     }
@@ -292,14 +296,17 @@ main (int argc, char *argv[])
   // Global configurations
   // ****************************************
   double simTime = 60;          // sim time, 1 min by default
+  bool startTcpdump = false;    // capture traffic on namespace 
   bool sumo_gui = false;
   double sumo_updates = 0.01;   // sumo update rate 
   std::string csv_name;
 
   /* MPTCP NETLINK PATH MANAGER */
   bool use_mptcp_pm = false ;     // use mptcpd path manager or not
-  int iperf_session = 0;      // start iperf session time is sec  
+  int iperf_session = 0;      // start iperf session time is sec 
+  int iperfStart = 1 ;        // start capture traffic from time  
   mptcpdFd = -1 ;             // file desc to connect to mptcpd plugin
+  g_signalDbm = -45;        // init value 
   
   // Disabling this option turns off the whole V2X application
   // (useful for comparing the situation when the application is enabled and 
@@ -309,7 +316,7 @@ main (int argc, char *argv[])
   bool m_prr_sup = false;
   bool print_summary = false; // To print summary at the end of simulation
 
-  // bool aggregate_out = false;
+   // bool aggregate_out = false;
   // bool vehicle_vis = false;
 
   // TODO : push sumo path folder/files declaration up to here  
@@ -323,8 +330,13 @@ main (int argc, char *argv[])
   cmd.AddValue ("use-mptcpd", 
                         "Use or not netlink MPTCP Path manager", use_mptcp_pm); 
   cmd.AddValue ("iperf", 
-                        "Send CMD to Start iperf session on namespace for x sec", 
-                        iperf_session); 
+                "Start iperf session on namespace from [1 to x] sec.\ 
+                Set iperfStart time to other init value", iperf_session); 
+  cmd.AddValue ("iperfStart", 
+                "Set initial time to captute traffic, default 1", iperfStart); 
+  cmd.AddValue ("tcpdump", 
+                "Capture traffic on interfaces of namespace during simTime-1", 
+                        startTcpdump); 
   
   
   // cmd.AddValue ("sumo-folder","Position of sumo config files",sumo_folder);
@@ -340,8 +352,7 @@ main (int argc, char *argv[])
                 // vehicle_vis);
   cmd.AddValue ("send-cam",
                 "Turn on or off the transmission of CAMs, thus turning on \
-                or off the whole V2X application",
-                send_cam);
+                or off the whole V2X application",  send_cam);
 //   cmd.AddValue ("csv-log-cumulative",  
 //                     "Name of the CSV log file for the cumulative (average) \
 //                     PRR and latency data", 
@@ -885,9 +896,11 @@ main (int argc, char *argv[])
   // ********************************************************
   
   // send TEST msg ---> Check connection, Start TcpDump recording 
-  struct sspi_ns3_message sspi_msg = {.type = SSPI_CMD_TEST, 
-                                      .value = (int)simTime };
-  Simulator::Schedule (MilliSeconds (500), &mptcpdWrite, sspi_msg);
+  if (startTcpdump){
+      struct sspi_ns3_message sspi_msg = {.type = SSPI_CMD_TCPDUMP, 
+                                          .value = (int) simTime - 1};
+      Simulator::Schedule (MilliSeconds (500), &mptcpdWrite, sspi_msg);
+  }
 
   if (use_mptcp_pm)
     {
@@ -900,17 +913,23 @@ main (int argc, char *argv[])
 
   if (iperf_session)
     {
-       uint64_t start_time = 10 ;  
-      // start iperf MPTCP session after 10 sec of simulation
+      // start iperf MPTCP session after [iperfStart] of simulation
       // session duration is defined in iperf_session variable
       struct sspi_ns3_message sspi_msg = {.type = SSPI_CMD_IPERF_START, 
                                           .value = iperf_session};
-      Simulator::Schedule (Seconds(start_time), &mptcpdWrite, sspi_msg);
-      
+      Simulator::Schedule (Seconds(iperfStart), &mptcpdWrite, sspi_msg);
+
       // set LTE endpoint to backup at start of iperf session
-    //   Simulator::Schedule (Seconds (start_time+3), 
-    //                         &set_endpoin_backup, SSPI_IFACE_LTE);
+      //   Simulator::Schedule (Seconds (start_time+3),
+      //                         &set_endpoin_backup, SSPI_IFACE_LTE);
     }
+
+  // Show parameters : 
+   std::cout <<  "SimTime: " << simTime << "\n" << 
+                "TcpDump: " << startTcpdump << "\n" <<
+                "IperfTime: " << iperf_session << "\n" <<
+                "IperfStart: " << iperfStart << "\n" <<
+                "SendCam: " << send_cam << "\n" << std::endl; 
 
   /*
     config output , write config params to file
