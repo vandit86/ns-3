@@ -255,8 +255,8 @@ MonitorSniffRx (Ptr<const Packet> packet, uint16_t channelFreqMhz, WifiTxVector 
   // send backup flag (initially sspi:backup = false)
 
   // SIMPLE LPF  α * x[i] + (1-α) * y[i-1]
-  double RSSI_T = -75; // RSSI Threashold value
-  double alpha = 0.75; // alpha value 
+  double RSSI_T = -80; // RSSI Threashold value
+  double alpha = 0.85; // alpha value 
   g_signalDbm = alpha * signalNoise.signal + (1-alpha)*g_signalDbm; 
   
   //CHACKING SIGNAL RSSI VALUE 
@@ -306,7 +306,7 @@ main (int argc, char *argv[])
   int iperf_session = 0;      // start iperf session time is sec 
   int iperfStart = 1 ;        // start capture traffic from time  
   mptcpdFd = -1 ;             // file desc to connect to mptcpd plugin
-  g_signalDbm = -45;        // init value 
+  g_signalDbm = -45;        // init value rssi (dBm)
   
   // Disabling this option turns off the whole V2X application
   // (useful for comparing the situation when the application is enabled and 
@@ -315,6 +315,11 @@ main (int argc, char *argv[])
   double m_baseline_prr = 150.0;
   bool m_prr_sup = false;
   bool print_summary = false; // To print summary at the end of simulation
+
+  std::string sumo_folder = "src/automotive/examples/sumo_files_v2v_map/";
+  std::string mob_trace = "cars.rou.xml";
+  std::string sumo_config = 
+                "src/automotive/examples/sumo_files_v2v_map/map.sumo.cfg";
 
    // bool aggregate_out = false;
   // bool vehicle_vis = false;
@@ -339,20 +344,22 @@ main (int argc, char *argv[])
                         startTcpdump); 
   
   
-  // cmd.AddValue ("sumo-folder","Position of sumo config files",sumo_folder);
-  // cmd.AddValue ("mob-trace", "Name of the mobility trace file", mob_trace);
-  // cmd.AddValue ("sumo-config", "Location and name of SUMO configuration file, 
-                                                // sumo_config);
-  cmd.AddValue ("csv-log", "Name of the CSV log file", csv_name);
-  cmd.AddValue ("summary", 
-                "Print a summary for each vehicle at the end of the simulation",
-                print_summary);
-  //cmd.AddValue ("vehicle-visualizer", 
-                // "Activate the web-based vehicle visualizer for ms-van3t", 
-                // vehicle_vis);
+  cmd.AddValue ("sumo-folder","Position of sumo config files",sumo_folder);
+  cmd.AddValue ("mob-trace", "Name of the mobility trace file", mob_trace);
+  cmd.AddValue ("sumo-config", "Location and name of SUMO configuration file", 
+                                                 sumo_config);
+  // cmd.AddValue ("csv-log", "Name of the CSV log file", csv_name);
+  // cmd.AddValue ("summary", 
+  //               "Print a summary for each vehicle at the end of the simulation",
+  //               print_summary);
+  //  cmd.AddValue ("vehicle-visualizer", 
+  //  "Activate the web-based vehicle visualizer for ms-van3t", 
+  //  vehicle_vis);
+  
   cmd.AddValue ("send-cam",
                 "Turn on or off the transmission of CAMs, thus turning on \
                 or off the whole V2X application",  send_cam);
+
 //   cmd.AddValue ("csv-log-cumulative",  
 //                     "Name of the CSV log file for the cumulative (average) \
 //                     PRR and latency data", 
@@ -560,11 +567,7 @@ main (int argc, char *argv[])
   // *************************************************************************
 
   /*** 0.a App Options ***/
-  std::string sumo_folder = "src/automotive/examples/sumo_files_v2v_map/";
-  std::string mob_trace = "cars.rou.xml";
-  std::string sumo_config = 
-                "src/automotive/examples/sumo_files_v2v_map/map.sumo.cfg";
-
+  
   // 0.b parsing xml to get num of veh
   std::cout << "Reading the .rou file..." << std::endl;
   std::string path = sumo_folder + mob_trace;
