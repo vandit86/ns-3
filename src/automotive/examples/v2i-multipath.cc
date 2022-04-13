@@ -61,7 +61,7 @@ double g_signalDbm;
 /** NS-3 connection glob vars **/
 
 /* we need to save information about iface connection state (in backup or not)
-    index of array represents endpoint num (support only 2 inaces) 
+    index of array represents endpoint num (support only 2 endpoints) 
     size = num ifaces + 1 
 */
 bool sspi_iface_backup[3] = {false};
@@ -148,9 +148,7 @@ getNumberVeh (std::string path)
 
 /**
  * @brief write to mptcpd-plugin path manager, requires sudo ? 
- * 
- * @param fd file descriptor of named pipe (FIFO) used to communicate with 
- * our mptcpd-plugin 
+ * @param msg struct sspi_ns3_message to send to our mptcpd through FIFO 
  */
 void
 mptcpdWrite (struct sspi_ns3_message msg)
@@ -164,7 +162,6 @@ mptcpdWrite (struct sspi_ns3_message msg)
         Note: we should run ns3 with sudo , since netns run under root
         and permitions of pipe
     */
-    // std::cout << "fd = " << mptcpdFd<< std::endl ;
     if (mptcpdFd < 0 ){
         std::cout << "NEW connection to mptcpd" << std::endl; 
         mptcpdFd = open (SSPI_FIFO_PATH, O_WRONLY, O_NDELAY);
@@ -172,8 +169,8 @@ mptcpdWrite (struct sspi_ns3_message msg)
     
     // no thread are listing : try again later, or exit ?? 
     if (mptcpdFd < 0){
-        std::cout << "unable to open pipe: " 
-                    << SSPI_FIFO_PATH << std::endl;  
+        std::cout << "unable to open pipe: " << SSPI_FIFO_PATH  
+                  << ", mptcpd deamon not listening ? " << std::endl;  
     }
     else {
       int num = write (mptcpdFd, &msg, sizeof (msg));
@@ -186,29 +183,27 @@ mptcpdWrite (struct sspi_ns3_message msg)
 
 /**
  * @brief Set the endpoin to backup flag 
- * 
  * @param id ID of the endpoint  
  */
 void
 set_endpoin_backup (int id)
 {
-  std::cout << Simulator::Now ().GetSeconds () 
-            << " Send Backup endpoint " << id << std ::endl;
+  std::cout << Simulator::Now().GetSeconds() 
+            << "Send Backup endpoint " << id << std ::endl;
   struct sspi_ns3_message msg = {.type = SSPI_CMD_BACKUP_FLAG_ON,
-                                 .value = id}; // on 2nd end
+                                 .value = id}; 
   mptcpdWrite (msg);
   sspi_iface_backup[id] = true;
 }
 
 /**
  * @brief Clear all flags for endpoint 
- * 
  * @param id ID of the endpoint 
  */
 void 
 clear_endpoint_falgs (int id){
   std::cout << Simulator::Now ().GetSeconds () 
-            << " Clear flags endpoint " << id << std ::endl;
+            << "Clear flags endpoint " << id << std ::endl;
   struct sspi_ns3_message msg = {.type = SSPI_CMD_CLEAR_FLAGS, 
                                 .value = id}; 
   mptcpdWrite (msg);
@@ -260,16 +255,17 @@ MonitorSniffRx (Ptr<const Packet> packet, uint16_t channelFreqMhz, WifiTxVector 
   g_signalDbm = alpha * signalNoise.signal + (1-alpha)*g_signalDbm; 
   
   //CHACKING SIGNAL RSSI VALUE 
-  if (g_signalDbm < (RSSI_T) && !sspi_iface_backup[SSPI_IFACE_WLAN])
-    {
+  if (g_signalDbm < (RSSI_T) && !sspi_iface_backup[SSPI_IFACE_WLAN]) {
       // check if lte is in backup mode, if so clean flags on LTE iface
       if (sspi_iface_backup[SSPI_IFACE_LTE])
         {
           clear_endpoint_falgs (SSPI_IFACE_LTE);
           return;
         }
+      // now we can set WLAN to backup 
       set_endpoin_backup (SSPI_IFACE_WLAN);
-    }
+  }
+  // RSSI is Higher than threashold -> turn on WLAN 
   else if (g_signalDbm > (RSSI_T) && sspi_iface_backup[SSPI_IFACE_WLAN])
     {
       clear_endpoint_falgs (SSPI_IFACE_WLAN);
@@ -297,20 +293,19 @@ main (int argc, char *argv[])
   // ****************************************
   double simTime = 60;          // sim time, 1 min by default
   bool startTcpdump = false;    // capture traffic on namespace 
-  bool sumo_gui = false;
+  bool sumo_gui = false;        // no SUMO GUI by defauls 
   double sumo_updates = 0.01;   // sumo update rate 
   std::string csv_name;
 
   /* MPTCP NETLINK PATH MANAGER */
   bool use_mptcp_pm = false ;     // use mptcpd path manager or not
-  int iperf_session = 0;      // start iperf session time is sec 
-  int iperfStart = 1 ;        // start capture traffic from time  
-  mptcpdFd = -1 ;             // file desc to connect to mptcpd plugin
-  g_signalDbm = -45;        // init value rssi (dBm)
+  int iperf_session = 0;          // start iperf session time is sec 
+  int iperfStart = 1 ;            // start capture traffic from time  
+  mptcpdFd = -1 ;                 // file desc to connect to mptcpd plugin
+  g_signalDbm = -45;              // init value rssi (dBm)
   
+  /*  MS-VAN3T configuration */
   // Disabling this option turns off the whole V2X application
-  // (useful for comparing the situation when the application is enabled and 
-  // the one in which it is disabled)
   bool send_cam = true;
   double m_baseline_prr = 150.0;
   bool m_prr_sup = false;
@@ -321,7 +316,7 @@ main (int argc, char *argv[])
   std::string sumo_config = 
                 "src/automotive/examples/sumo_files_v2v_map/map.sumo.cfg";
 
-   // bool aggregate_out = false;
+  // bool aggregate_out = false;
   // bool vehicle_vis = false;
 
   // TODO : push sumo path folder/files declaration up to here  
@@ -396,7 +391,7 @@ main (int argc, char *argv[])
   NodeContainer nodes;      // Create two ghost nodes.
   nodes.Create (2);
 
-  NodeContainer nodeAP;     // create one wifi AP node
+  NodeContainer nodeAP;     // create one RSU node
   nodeAP.Create (1);
 
   NodeContainer enbNode;    // create one eNB node
@@ -576,7 +571,7 @@ main (int argc, char *argv[])
             << "vehicles will be present in the simulation." << std::endl;
 
   /* 1. Configure dynamic vehicles */
-  //(-1) since our UE node is placed in first vehicle
+  //(-1) since our UE node is placed in the first vehicle
   obuNodes.Create (numberOfNodes - 1); 
   if (obuNodes.GetN () > 0)
     {
@@ -660,6 +655,7 @@ main (int argc, char *argv[])
 
   /* callback function for node creation, return newlly created Node  */
   std::function<Ptr<Node> ()> setupNewWifiNode = [&] () -> Ptr<Node> {
+    
     Ptr<Node> includedNode;
     /* 
         first time call this function
@@ -719,7 +715,7 @@ main (int argc, char *argv[])
   sumoClient->SumoSetup (setupNewWifiNode, shutdownWifiNode);
 
   // ****************************************************************************************************************
-  //                  Configure FDNetDevices and connect to TAP file descriptor
+  //    Configure FDNetDevices and connect to TAP file descriptor
   // ****************************************************************************************************************
 
   EmuFdNetDeviceHelper fdNet;
@@ -898,13 +894,14 @@ main (int argc, char *argv[])
   // MPTCPD: Interaction with MPTCPD Path manager
   // ********************************************************
   
-  // send TEST msg ---> Check connection, Start TcpDump recording 
+  // Start TcpDump recording 
   if (startTcpdump){
       struct sspi_ns3_message sspi_msg = {.type = SSPI_CMD_TCPDUMP, 
                                           .value = (int) simTime - 1};
       Simulator::Schedule (MilliSeconds (500), &mptcpdWrite, sspi_msg);
   }
 
+  // use MPTCPD PM to control subflows 
   if (use_mptcp_pm)
     {
       // monitor 802.11p RF metrics for each received pack
@@ -921,10 +918,6 @@ main (int argc, char *argv[])
       struct sspi_ns3_message sspi_msg = {.type = SSPI_CMD_IPERF_START, 
                                           .value = iperf_session};
       Simulator::Schedule (Seconds(iperfStart), &mptcpdWrite, sspi_msg);
-
-      // set LTE endpoint to backup at start of iperf session
-      //   Simulator::Schedule (Seconds (start_time+3),
-      //                         &set_endpoin_backup, SSPI_IFACE_LTE);
     }
 
   // Show parameters : 
