@@ -66,6 +66,8 @@ double g_signalDbm;
 */
 bool sspi_iface_backup[3] = {false};
 
+// control subflows from userspace   
+bool use_mptcp_pm = false ;     // use mptcpd path manager or not        
 int mptcpdFd;      // file descriptor to interact with mptcpd             
 
 /**
@@ -113,6 +115,29 @@ JitterMonitor (Ptr<RealtimeSimulatorImpl> rt)
   Time j = (ts >= mc) ? ts - mc : mc - ts;
   std::cout << j.GetMicroSeconds () << std::endl;
   Simulator::Schedule (MilliSeconds (100), &JitterMonitor, rt);
+}
+
+/**
+ * @brief get and print position of our vehicle periodicaly
+ * 
+ * @param sumoClient 
+ * @param vId 
+ */
+
+void
+PrintVehicleData ( Ptr<TraciClient> sumoClient, const std::string vId){
+  libsumo::TraCIPosition traPos = sumoClient->TraCIAPI::vehicle.getPosition(vId); 
+  std::cout <<  Simulator::Now().GetSeconds() << " , "
+            << traPos.getString() 
+            << ", Signal dBm: " << g_signalDbm
+            << std::endl;
+
+  Simulator::Schedule (Seconds(1), &PrintVehicleData, sumoClient, vId); 
+}
+
+void 
+PrintSignalDBm (){
+  std::cout << " Signal: " << g_signalDbm << std::endl ;  
 }
 
 /**
@@ -254,6 +279,8 @@ MonitorSniffRx (Ptr<const Packet> packet, uint16_t channelFreqMhz, WifiTxVector 
   double alpha = 0.85; // alpha value 
   g_signalDbm = alpha * signalNoise.signal + (1-alpha)*g_signalDbm; 
   
+  if (!use_mptcp_pm) return ; // just monitor and return if not enabled 
+
   //CHACKING SIGNAL RSSI VALUE 
   if (g_signalDbm < (RSSI_T) && !sspi_iface_backup[SSPI_IFACE_WLAN]) {
       // check if lte is in backup mode, if so clean flags on LTE iface
@@ -298,7 +325,7 @@ main (int argc, char *argv[])
   std::string csv_name;
 
   /* MPTCP NETLINK PATH MANAGER */
-  bool use_mptcp_pm = false ;     // use mptcpd path manager or not
+  
   int iperf_session = 0;          // start iperf session time is sec 
   int iperfStart = 1 ;            // start capture traffic from time  
   mptcpdFd = -1 ;                 // file desc to connect to mptcpd plugin
@@ -306,6 +333,8 @@ main (int argc, char *argv[])
   
   /*  MS-VAN3T configuration */
   // Disabling this option turns off the whole V2X application
+  // sumo id of our first vehicle
+  std::string m_vId = "veh1"; 
   bool send_cam = true;
   double m_baseline_prr = 150.0;
   bool m_prr_sup = false;
@@ -421,9 +450,9 @@ main (int argc, char *argv[])
   Ptr<ListPositionAllocator> positionAlloc = 
                             CreateObject<ListPositionAllocator> ();
   positionAlloc->Add (Vector (0, 0, 0)); // pos of left
-  positionAlloc->Add (Vector (0, 0, 20)); // pos of AP  --> center of SUMO map
+  positionAlloc->Add (Vector (25, -50, 10)); // pos of AP  --> center of SUMO map
   positionAlloc->Add (Vector (25, 0, 0)); // pos of right
-  positionAlloc->Add (Vector (60, 0, 20)); // pos of eNodeB
+  positionAlloc->Add (Vector (60, -50, 20)); // pos of eNodeB
 
   MobilityHelper mobility; // mobility helper
   mobility.SetPositionAllocator (positionAlloc);
@@ -653,6 +682,19 @@ main (int argc, char *argv[])
   AreaSpeedAdvisorClient80211pHelper.SetAttribute(
                             "PRRSupervisor", PointerValue (prrSup));
 
+  /*** 6. Create and Setup application for the server ***/
+  // areaSpeedAdvisorServer80211pHelper AreaSpeedAdvisorServer80211pHelper;
+  // AreaSpeedAdvisorServer80211pHelper.SetAttribute ("Client", (PointerValue) sumoClient);
+  // AreaSpeedAdvisorServer80211pHelper.SetAttribute ("RealTime", BooleanValue(true));
+  //AreaSpeedAdvisorServer80211pHelper.SetAttribute ("AggregateOutput", BooleanValue(true));
+
+  // need on RSU to generate CAM 
+  // ApplicationContainer AppServer = AreaSpeedAdvisorServer80211pHelper.Install (nodeAP);
+  // AppServer.Start (Seconds (1.0));
+  // AppServer.Stop (ns3::Seconds (simTime) - Simulator::Now () - Seconds (0.1));
+
+
+
   /* callback function for node creation, return newlly created Node  */
   std::function<Ptr<Node> ()> setupNewWifiNode = [&] () -> Ptr<Node> {
     
@@ -662,10 +704,7 @@ main (int argc, char *argv[])
         veh1 is our UE connected to Left Namespace
     */ 
     if (nodeCounter == 0) 
-      {
-        // sumo id of our first vehicle
-        std::string m_vId = "veh1"; 
-        
+      {      
         includedNode = nodes.Get (0);
         libsumo::TraCIColor red;
         red.r = 255;
@@ -673,7 +712,7 @@ main (int argc, char *argv[])
         red.b = 0;
         red.a = 255;
         // set different color to our vehicle
-        sumoClient->TraCIAPI::vehicle.setColor (m_vId, red); 
+        sumoClient->TraCIAPI::vehicle.setColor (m_vId, red);   
       }
     else
       {
@@ -685,11 +724,11 @@ main (int argc, char *argv[])
     std::cout   << "Created Vehicle ID : " << nodeCounter << ", Node ID : " 
                 << includedNode->GetId () << std::endl;
 
-    /* Install Application */
-    ApplicationContainer ClientApp = 
-                AreaSpeedAdvisorClient80211pHelper.Install (includedNode);
-    ClientApp.Start (Seconds (0.0));
-    ClientApp.Stop (ns3::Seconds (simTime) - Simulator::Now () - Seconds (0.1));
+    // /* Install Application on all vehicles*/
+    // ApplicationContainer ClientApp = 
+    //             AreaSpeedAdvisorClient80211pHelper.Install (includedNode);
+    // ClientApp.Start (Seconds (0.0));
+    // ClientApp.Stop (ns3::Seconds (simTime) - Simulator::Now () - Seconds (0.1));
 
     return includedNode;
   };
@@ -880,7 +919,7 @@ main (int argc, char *argv[])
   // ********************************************************
   // Debug: Testing that proper IP addresses are configured
   // ********************************************************
-  // wifiPhy.EnablePcap("mp-v2i",nodes);
+  wifiPhy.EnablePcap("mp-v2i",nodeAP);
   // wifiPhy.EnablePcapAll ("mp-wifi", true);
   // csma.EnablePcapAll ("mp-csma", true);
   // fdNet.EnablePcapAll ("mp-fd", true);
@@ -901,15 +940,11 @@ main (int argc, char *argv[])
       Simulator::Schedule (MilliSeconds (500), &mptcpdWrite, sspi_msg);
   }
 
-  // use MPTCPD PM to control subflows 
-  if (use_mptcp_pm)
-    {
-      // monitor 802.11p RF metrics for each received pack
-      // and sends commands to set BACKUP flag  
-      Config::ConnectWithoutContext (
-                  "/NodeList/0/DeviceList/*/Phy/MonitorSnifferRx",
-                                     MakeCallback (&MonitorSniffRx));
-    }
+  // use MPTCPD PM to control subflows
+  // monitor 802.11p RF metrics for each received pack
+  // and sends commands to set BACKUP flag
+  Config::ConnectWithoutContext ("/NodeList/0/DeviceList/*/Phy/MonitorSnifferRx",
+                                 MakeCallback (&MonitorSniffRx));
 
   if (iperf_session)
     {
@@ -919,6 +954,10 @@ main (int argc, char *argv[])
                                           .value = iperf_session};
       Simulator::Schedule (Seconds(iperfStart), &mptcpdWrite, sspi_msg);
     }
+  
+  Simulator::Schedule (MilliSeconds (500), &PrintVehicleData, sumoClient, m_vId);
+  //Simulator::Schedule (MilliSeconds (500), &PrintSignalDBm);
+  
 
   // Show parameters : 
    std::cout <<  "SimTime: " << simTime << "\n" << 
