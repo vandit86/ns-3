@@ -117,6 +117,22 @@ JitterMonitor (Ptr<RealtimeSimulatorImpl> rt)
   Simulator::Schedule (MilliSeconds (100), &JitterMonitor, rt);
 }
 
+static void 
+GenerateTraffic (Ptr<Socket> socket, uint32_t pktSize,
+                             uint32_t pktCount, Time pktInterval )
+{
+  if (pktCount > 0)
+    {
+      socket->Send (Create<Packet> (pktSize));
+      Simulator::Schedule (pktInterval, &GenerateTraffic,
+                           socket, pktSize,pktCount, pktInterval);
+    }
+  else
+    {
+      socket->Close ();
+    }
+}
+
 /**
  * @brief get and print position of our vehicle periodicaly
  * 
@@ -323,6 +339,7 @@ main (int argc, char *argv[])
   bool sumo_gui = false;        // no SUMO GUI by defauls 
   double sumo_updates = 0.01;   // sumo update rate 
   std::string csv_name;
+  bool verbose = true ; 
 
   /* MPTCP NETLINK PATH MANAGER */
   
@@ -366,7 +383,7 @@ main (int argc, char *argv[])
   cmd.AddValue ("tcpdump", 
                 "Capture traffic on interfaces of namespace during simTime-1", 
                         startTcpdump); 
-  
+  cmd.AddValue ("verbose", "Print debug data every second", verbose); 
   
   cmd.AddValue ("sumo-folder","Position of sumo config files",sumo_folder);
   cmd.AddValue ("mob-trace", "Name of the mobility trace file", mob_trace);
@@ -661,40 +678,22 @@ main (int argc, char *argv[])
 
   AreaSpeedAdvisorClient80211pHelper.SetAttribute(
                         "ServerAddr", Ipv4AddressValue (remoteHostAddr));
-  
   // pass TraciClient object for accessing sumo in application                        
   AreaSpeedAdvisorClient80211pHelper.SetAttribute(
                         "Client", (PointerValue) sumoClient); 
-  
   AreaSpeedAdvisorClient80211pHelper.SetAttribute(
                         "PrintSummary", BooleanValue (print_summary));
-  
   // working in real time ONLY
   AreaSpeedAdvisorClient80211pHelper.SetAttribute (
                             "RealTime", BooleanValue (true));
-
   AreaSpeedAdvisorClient80211pHelper.SetAttribute(
                             "CSV", StringValue (csv_name));
-  
   AreaSpeedAdvisorClient80211pHelper.SetAttribute(
                             "SendCAM", BooleanValue (send_cam));
-  
   AreaSpeedAdvisorClient80211pHelper.SetAttribute(
                             "PRRSupervisor", PointerValue (prrSup));
 
-  /*** 6. Create and Setup application for the server ***/
-  // areaSpeedAdvisorServer80211pHelper AreaSpeedAdvisorServer80211pHelper;
-  // AreaSpeedAdvisorServer80211pHelper.SetAttribute ("Client", (PointerValue) sumoClient);
-  // AreaSpeedAdvisorServer80211pHelper.SetAttribute ("RealTime", BooleanValue(true));
-  //AreaSpeedAdvisorServer80211pHelper.SetAttribute ("AggregateOutput", BooleanValue(true));
-
-  // need on RSU to generate CAM 
-  // ApplicationContainer AppServer = AreaSpeedAdvisorServer80211pHelper.Install (nodeAP);
-  // AppServer.Start (Seconds (1.0));
-  // AppServer.Stop (ns3::Seconds (simTime) - Simulator::Now () - Seconds (0.1));
-
-
-
+  
   /* callback function for node creation, return newlly created Node  */
   std::function<Ptr<Node> ()> setupNewWifiNode = [&] () -> Ptr<Node> {
     
@@ -915,11 +914,44 @@ main (int argc, char *argv[])
   //                        Configure APPLICATIONS
   // **************************************************************************
   
+  /*** 6. Create and Setup application for the server ***/
+  // areaSpeedAdvisorServer80211pHelper AreaSpeedAdvisorServer80211pHelper;
+  // AreaSpeedAdvisorServer80211pHelper.SetAttribute ("Client", (PointerValue) sumoClient);
+  // AreaSpeedAdvisorServer80211pHelper.SetAttribute ("RealTime", BooleanValue(true));
+  //AreaSpeedAdvisorServer80211pHelper.SetAttribute ("AggregateOutput", BooleanValue(true));
+
+  // need on RSU to generate CAM 
+  // ApplicationContainer AppServer = AreaSpeedAdvisorServer80211pHelper.Install (nodeAP);
+  // AppServer.Start (Seconds (1.0));
+  // AppServer.Stop (ns3::Seconds (simTime) - Simulator::Now () - Seconds (0.1));
+
+
+  /* GENERATE  UDP TRAFFIC ON RSU */ 
+  TypeId tid = TypeId::LookupByName ("ns3::UdpSocketFactory");
+  // Ptr<Socket> recvSink = Socket::CreateSocket (nodeAP.Get (0), tid);
+  // InetSocketAddress local = InetSocketAddress (Ipv4Address::GetAny (), 80);
+  // recvSink->Bind (local);
+  //recvSink->SetRecvCallback (MakeCallback (&ReceivePacket));
+
+  Ptr<Socket> source = Socket::CreateSocket (nodeAP.Get (0), tid);
+  InetSocketAddress remote = InetSocketAddress (Ipv4Address ("255.255.255.255"), 80);
+  source->SetAllowBroadcast (true);
+  source->Connect (remote);
+
+
+  uint32_t packetSize = 100; // bytes
+  uint32_t numPackets = 1;
+  double interval = 100.0; // milliseconds send pack interval 
+
+  Simulator::ScheduleWithContext (source->GetNode ()->GetId (),
+                                  Seconds (1.0), &GenerateTraffic,
+                                  source, packetSize, numPackets, MilliSeconds(interval));
+
 
   // ********************************************************
   // Debug: Testing that proper IP addresses are configured
   // ********************************************************
-  wifiPhy.EnablePcap("mp-v2i",nodeAP);
+  wifiPhy.EnablePcap("mp-v2i",nodeAP);  
   // wifiPhy.EnablePcapAll ("mp-wifi", true);
   // csma.EnablePcapAll ("mp-csma", true);
   // fdNet.EnablePcapAll ("mp-fd", true);
@@ -955,16 +987,20 @@ main (int argc, char *argv[])
       Simulator::Schedule (Seconds(iperfStart), &mptcpdWrite, sspi_msg);
     }
   
-  Simulator::Schedule (MilliSeconds (500), &PrintVehicleData, sumoClient, m_vId);
-  //Simulator::Schedule (MilliSeconds (500), &PrintSignalDBm);
+  // Print debug info 
+  if (verbose){
+      Simulator::Schedule (
+          MilliSeconds (500), &PrintVehicleData, sumoClient, m_vId);
+  }
   
-
   // Show parameters : 
-   std::cout <<  "SimTime: " << simTime << "\n" << 
-                "TcpDump: " << startTcpdump << "\n" <<
-                "IperfTime: " << iperf_session << "\n" <<
-                "IperfStart: " << iperfStart << "\n" <<
-                "SendCam: " << send_cam << "\n" << std::endl; 
+   std::cout <<  "SimTime: " << simTime << "\n" 
+                << "TcpDump: " << startTcpdump << "\n" 
+                << "IperfTime: " << iperf_session << "\n" 
+                << "IperfStart: " << iperfStart << "\n" 
+                << "SendCam: " << send_cam << "\n" 
+                << "Verbose: "  << verbose << "\n" 
+                << std::endl; 
 
   /*
     config output , write config params to file
