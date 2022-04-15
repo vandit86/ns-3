@@ -51,6 +51,8 @@ using namespace ns3;
 /* we run in real-time , so no loggin is avilable  */
 //NS_LOG_COMPONENT_DEFINE ("MpFdExample");
 
+#define MAX_VEH_SPEED 100 // 100 km/h
+#define MIN_VEH_SPEED 10  // 10 Km/h
 // Global variables for use in callbacks.
 double g_signalDbm;
 //double g_noiseDbmAvg;
@@ -143,17 +145,36 @@ GenerateTraffic (Ptr<Socket> socket, uint32_t pktSize,
 void
 PrintVehicleData ( Ptr<TraciClient> sumoClient, const std::string vId){
   libsumo::TraCIPosition traPos = sumoClient->TraCIAPI::vehicle.getPosition(vId); 
+  double vSpeed = sumoClient->TraCIAPI::vehicle.getSpeed(vId); 
   std::cout <<  Simulator::Now().GetSeconds() << " , "
             << traPos.getString() 
-            << ", Signal dBm: " << g_signalDbm
+            << ", speed: " << vSpeed
+            << ", RSSI dBm: " << g_signalDbm
             << std::endl;
 
   Simulator::Schedule (Seconds(1), &PrintVehicleData, sumoClient, vId); 
 }
 
+/**
+ * @brief Change periodicaly max vehicle speed. Range [10 - 100] km/h
+ * change speed every [1 - 2]  min    
+ * @param sumoClient 
+ * @param vehId 
+ */
+
 void 
-PrintSignalDBm (){
-  std::cout << " Signal: " << g_signalDbm << std::endl ;  
+ChangeVehicleSpeed (Ptr<TraciClient> sumoClient , std::string vehId){
+  
+  // rand() % (max_number + 1 - minimum_number) + minimum_number
+  double newMaxSpeed = rand()%(MAX_VEH_SPEED+1 - MIN_VEH_SPEED) + MIN_VEH_SPEED; 
+  std::cout << "New " << vehId 
+            << "  max speed:"
+            << newMaxSpeed << " km/h" << std::endl;
+  sumoClient->TraCIAPI::vehicle.setMaxSpeed(vehId, newMaxSpeed/3.6); 
+
+  Simulator::Schedule (Minutes(1 + rand()/RAND_MAX), 
+                        &ChangeVehicleSpeed, sumoClient, vehId);
+
 }
 
 /**
@@ -290,6 +311,8 @@ MonitorSniffRx (Ptr<const Packet> packet, uint16_t channelFreqMhz, WifiTxVector 
   // 34.5908	-81.7451	-96.9763
   // send backup flag (initially sspi:backup = false)
 
+  // Beacon size == 74 
+  // std::cout << " Packet size : " << packet->GetSize() << std::endl; 
   // SIMPLE LPF  α * x[i] + (1-α) * y[i-1]
   double RSSI_T = -80; // RSSI Threashold value
   double alpha = 0.85; // alpha value 
@@ -339,14 +362,15 @@ main (int argc, char *argv[])
   bool sumo_gui = false;        // no SUMO GUI by defauls 
   double sumo_updates = 0.01;   // sumo update rate 
   std::string csv_name;
-  bool verbose = true ; 
+  bool verbose = true ;
+  bool changeVehMaxSpeed = true;// change periodicaly veh max speed  
 
   /* MPTCP NETLINK PATH MANAGER */
   
   int iperf_session = 0;          // start iperf session time is sec 
-  int iperfStart = 1 ;            // start capture traffic from time  
+  int iperfStart = 1 ;            // start generate traffic from time  
   mptcpdFd = -1 ;                 // file desc to connect to mptcpd plugin
-  g_signalDbm = -45;              // init value rssi (dBm)
+  g_signalDbm = -85;              // init value rssi (dBm)
   
   /*  MS-VAN3T configuration */
   // Disabling this option turns off the whole V2X application
@@ -379,7 +403,7 @@ main (int argc, char *argv[])
                 "Start iperf session on namespace from [1 to x] sec.\ 
                 Set iperfStart time to other init value", iperf_session); 
   cmd.AddValue ("iperfStart", 
-                "Set initial time to captute traffic, default 1", iperfStart); 
+                "Start generate traffic from time [s],", iperfStart); 
   cmd.AddValue ("tcpdump", 
                 "Capture traffic on interfaces of namespace during simTime-1", 
                         startTcpdump); 
@@ -413,6 +437,10 @@ main (int argc, char *argv[])
   cmd.AddValue ("prr-sup", "Use the PRR supervisor or not", m_prr_sup);
 
   cmd.Parse (argc, argv);
+
+  // check some input param errors
+  if (simTime < iperfStart) iperfStart = 0 ;  
+  if (simTime < iperf_session) iperf_session = 0 ;
 
   // Turn on simulation in real-time mode  
   GlobalValue::Bind ("SimulatorImplementationType", 
@@ -939,7 +967,7 @@ main (int argc, char *argv[])
   source->Connect (remote);
 
 
-  uint32_t packetSize = 100; // bytes
+  uint32_t packetSize = 10; // bytes  (+64 bytes)
   uint32_t numPackets = 1;
   double interval = 100.0; // milliseconds send pack interval 
 
@@ -992,6 +1020,11 @@ main (int argc, char *argv[])
       Simulator::Schedule (
           MilliSeconds (500), &PrintVehicleData, sumoClient, m_vId);
   }
+
+  if (changeVehMaxSpeed){
+    Simulator::Schedule (
+          Minutes (1), &ChangeVehicleSpeed, sumoClient, m_vId);
+  }
   
   // Show parameters : 
    std::cout <<  "SimTime: " << simTime << "\n" 
@@ -999,7 +1032,8 @@ main (int argc, char *argv[])
                 << "IperfTime: " << iperf_session << "\n" 
                 << "IperfStart: " << iperfStart << "\n" 
                 << "SendCam: " << send_cam << "\n" 
-                << "Verbose: "  << verbose << "\n" 
+                << "Verbose: "  << verbose << "\n"
+                << "Change Veh Speed " << changeVehMaxSpeed << "\n" 
                 << std::endl; 
 
   /*
