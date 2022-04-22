@@ -47,3 +47,4 @@ examples/multipath/git_token.txt
 ns3-sumo-coupling.xml
 src/traci-applications/examples/ns3-sumo-coupling.xml
 *.xpl
+nohup.out

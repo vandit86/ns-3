@@ -51,10 +51,13 @@ using namespace ns3;
 /* we run in real-time , so no loggin is avilable  */
 //NS_LOG_COMPONENT_DEFINE ("MpFdExample");
 
-#define MAX_VEH_SPEED 100 // 100 km/h
+#define MAX_VEH_SPEED 60 // 60 km/h
 #define MIN_VEH_SPEED 10  // 10 Km/h
 // Global variables for use in callbacks.
 double g_signalDbm;
+double average_RSU_conn_time; 
+double simTime = 60;          // sim time, 1 min by default
+
 //double g_noiseDbmAvg;
 //uint32_t g_samples;
 
@@ -162,20 +165,25 @@ PrintVehicleData ( Ptr<TraciClient> sumoClient, const std::string vId){
  * @param vehId 
  */
 
-void 
-ChangeVehicleSpeed (Ptr<TraciClient> sumoClient , std::string vehId){
+void ChangeVehicleSpeed (Ptr<TraciClient> sumoClient , std::string vehId){
   
-  // rand() % (max_number + 1 - minimum_number) + minimum_number
-  double newMaxSpeed = rand()%(MAX_VEH_SPEED+1 - MIN_VEH_SPEED) + MIN_VEH_SPEED; 
+  Ptr<UniformRandomVariable> x = CreateObject<UniformRandomVariable> ();
+  x->SetAttribute ("Min", DoubleValue (MIN_VEH_SPEED));
+  x->SetAttribute ("Max", DoubleValue (MAX_VEH_SPEED));
+  double newMaxSpeed = x->GetValue();  
+  
   std::cout << "New " << vehId 
             << "  max speed:"
             << newMaxSpeed << " km/h" << std::endl;
+  
   sumoClient->TraCIAPI::vehicle.setMaxSpeed(vehId, newMaxSpeed/3.6); 
 
+  // TODO: refactor rand  
   Simulator::Schedule (Minutes(1 + rand()/RAND_MAX), 
                         &ChangeVehicleSpeed, sumoClient, vehId);
 
 }
+
 
 /**
  * \brief Read from the mob_trace the number of vehicles that will be created.
@@ -242,6 +250,33 @@ mptcpdWrite (struct sspi_ns3_message msg)
       }
     }
 }
+
+/**
+ * @brief repeat iperf sessions until simulation ends, iperf session duration is 
+ * randomized, between [10:100] seconds -- 5:50 MB file size
+ * 
+ */
+
+void IperfRepeat ()
+{
+  // session duration is defined in iperf_duration variable
+  Ptr<UniformRandomVariable> x = CreateObject<UniformRandomVariable> ();
+  x->SetAttribute ("Min", DoubleValue (10));
+  x->SetAttribute ("Max", DoubleValue (100));
+
+  // set session duration, be cearful with simTime 
+  int duration = (int) x->GetInteger();
+  int time_left = (int) (simTime - Simulator::Now().GetSeconds());
+  duration = (duration > time_left-5 )? time_left - 5 : duration; 
+  if (duration < 0 ) return;  
+  
+  struct sspi_ns3_message sspi_msg = {.type = SSPI_CMD_IPERF_START, .value = duration};
+  mptcpdWrite (sspi_msg); 
+  std::cout << "New iperf session duration: " << duration << std::endl; 
+  
+  Simulator::Schedule (Seconds (duration + 1), &IperfRepeat);
+}
+
 
 /**
  * @brief Set the endpoin to backup flag 
@@ -357,20 +392,22 @@ main (int argc, char *argv[])
   // ****************************************
   // Global configurations
   // ****************************************
-  double simTime = 60;          // sim time, 1 min by default
+
   bool startTcpdump = false;    // capture traffic on namespace 
   bool sumo_gui = false;        // no SUMO GUI by defauls 
   double sumo_updates = 0.01;   // sumo update rate 
   std::string csv_name;
   bool verbose = true ;
-  bool changeVehMaxSpeed = true;// change periodicaly veh max speed  
+  bool changeVehMaxSpeed = false;// change periodicaly veh max speed 
+  bool iperfReapeat = false ;    // repeat iperf sessions  
 
   /* MPTCP NETLINK PATH MANAGER */
   
-  int iperf_session = 0;          // start iperf session time is sec 
+  int iperf_duration = 0;          // start iperf session time is sec 
   int iperfStart = 1 ;            // start generate traffic from time  
   mptcpdFd = -1 ;                 // file desc to connect to mptcpd plugin
   g_signalDbm = -85;              // init value rssi (dBm)
+  average_RSU_conn_time = 0.0;   // to calculate av connection time on RSU
   
   /*  MS-VAN3T configuration */
   // Disabling this option turns off the whole V2X application
@@ -400,14 +437,15 @@ main (int argc, char *argv[])
   cmd.AddValue ("use-mptcpd", 
                         "Use or not netlink MPTCP Path manager", use_mptcp_pm); 
   cmd.AddValue ("iperf", 
-                "Start iperf session on namespace from [1 to x] sec.\ 
-                Set iperfStart time to other init value", iperf_session); 
+                "iperf session duration", iperf_duration); 
   cmd.AddValue ("iperfStart", 
                 "Start generate traffic from time [s],", iperfStart); 
   cmd.AddValue ("tcpdump", 
                 "Capture traffic on interfaces of namespace during simTime-1", 
                         startTcpdump); 
-  cmd.AddValue ("verbose", "Print debug data every second", verbose); 
+  cmd.AddValue ("verbose", "Print debug data every second", verbose);
+  cmd.AddValue ("iperfRepeat", "Repeat iperf sessions umtil simulation end, the time of sessio is random value [10:100]sec", iperfReapeat); 
+  cmd.AddValue ("changeVehMaxSpeed", "Change vehicle maximum speed randomly from [10:100]km/h", changeVehMaxSpeed); 
   
   cmd.AddValue ("sumo-folder","Position of sumo config files",sumo_folder);
   cmd.AddValue ("mob-trace", "Name of the mobility trace file", mob_trace);
@@ -422,8 +460,7 @@ main (int argc, char *argv[])
   //  vehicle_vis);
   
   cmd.AddValue ("send-cam",
-                "Turn on or off the transmission of CAMs, thus turning on \
-                or off the whole V2X application",  send_cam);
+                "Turn on or off the transmission of CAMs, thus turning on or off the whole V2X application",  send_cam);
 
 //   cmd.AddValue ("csv-log-cumulative",  
 //                     "Name of the CSV log file for the cumulative (average) \
@@ -440,7 +477,7 @@ main (int argc, char *argv[])
 
   // check some input param errors
   if (simTime < iperfStart) iperfStart = 0 ;  
-  if (simTime < iperf_session) iperf_session = 0 ;
+  if (simTime < iperf_duration) iperf_duration = 0 ;
 
   // Turn on simulation in real-time mode  
   GlobalValue::Bind ("SimulatorImplementationType", 
@@ -739,7 +776,10 @@ main (int argc, char *argv[])
         red.b = 0;
         red.a = 255;
         // set different color to our vehicle
-        sumoClient->TraCIAPI::vehicle.setColor (m_vId, red);   
+        sumoClient->TraCIAPI::vehicle.setColor (m_vId, red);
+        // sumoClient->TraCIAPI::vehicle.setMaxSpeed (m_vId, 13.8); // 50 km/h
+        sumoClient->TraCIAPI::vehicle.setMaxSpeed (m_vId, 25/3.6); 
+
       }
     else
       {
@@ -780,9 +820,9 @@ main (int argc, char *argv[])
   /* Start traci client with given function pointers */
   sumoClient->SumoSetup (setupNewWifiNode, shutdownWifiNode);
 
-  // ****************************************************************************************************************
+  // **********************************************************************
   //    Configure FDNetDevices and connect to TAP file descriptor
-  // ****************************************************************************************************************
+  // **********************************************************************
 
   EmuFdNetDeviceHelper fdNet;
   NetDeviceContainer devices;
@@ -1006,15 +1046,20 @@ main (int argc, char *argv[])
   Config::ConnectWithoutContext ("/NodeList/0/DeviceList/*/Phy/MonitorSnifferRx",
                                  MakeCallback (&MonitorSniffRx));
 
-  if (iperf_session)
+  if (iperf_duration)
     {
       // start iperf MPTCP session after [iperfStart] of simulation
-      // session duration is defined in iperf_session variable
+      // session duration is defined in iperf_duration variable
       struct sspi_ns3_message sspi_msg = {.type = SSPI_CMD_IPERF_START, 
-                                          .value = iperf_session};
+                                          .value = iperf_duration};
       Simulator::Schedule (Seconds(iperfStart), &mptcpdWrite, sspi_msg);
     }
   
+  // generate truffic until simulation ends, continue to establish iperf sessions 
+  if (iperfReapeat){
+      Simulator::Schedule (Seconds (iperfStart+iperf_duration+1), &IperfRepeat);
+  }
+
   // Print debug info 
   if (verbose){
       Simulator::Schedule (
@@ -1029,11 +1074,12 @@ main (int argc, char *argv[])
   // Show parameters : 
    std::cout <<  "SimTime: " << simTime << "\n" 
                 << "TcpDump: " << startTcpdump << "\n" 
-                << "IperfTime: " << iperf_session << "\n" 
+                << "IperfTime: " << iperf_duration << "\n" 
                 << "IperfStart: " << iperfStart << "\n" 
                 << "SendCam: " << send_cam << "\n" 
                 << "Verbose: "  << verbose << "\n"
                 << "Change Veh Speed " << changeVehMaxSpeed << "\n" 
+                << "Repeat iperf " << iperfReapeat << "\n" 
                 << std::endl; 
 
   /*
