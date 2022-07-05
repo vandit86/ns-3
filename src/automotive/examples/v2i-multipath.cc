@@ -398,6 +398,7 @@ main (int argc, char *argv[])
   double sumo_updates = 0.01;   // sumo update rate 
   std::string csv_name;
   bool verbose = true ;
+  double maxVehSpeed = 25.0 ;    // initial max veh speed [km/h]
   bool changeVehMaxSpeed = false;// change periodicaly veh max speed 
   bool iperfReapeat = false ;    // repeat iperf sessions  
 
@@ -446,7 +447,7 @@ main (int argc, char *argv[])
   cmd.AddValue ("verbose", "Print debug data every second", verbose);
   cmd.AddValue ("iperfRepeat", "Repeat iperf sessions umtil simulation end, the time of sessio is random value [10:100]sec", iperfReapeat); 
   cmd.AddValue ("changeVehMaxSpeed", "Change vehicle maximum speed randomly from [10:100]km/h", changeVehMaxSpeed); 
-  
+  cmd.AddValue ("maxSpeed", "initial max veh speed [km/h]", maxVehSpeed); 
   cmd.AddValue ("sumo-folder","Position of sumo config files",sumo_folder);
   cmd.AddValue ("mob-trace", "Name of the mobility trace file", mob_trace);
   cmd.AddValue ("sumo-config", "Location and name of SUMO configuration file", 
@@ -582,7 +583,7 @@ main (int argc, char *argv[])
                 wifi80211p.Install (wifiPhy, wifi80211pMac, nodes_l_ap);
 
   // configure CSMA AP <--> REMOTE
-  csma.SetChannelAttribute ("DataRate", StringValue ("100Mbps"));
+  csma.SetChannelAttribute ("DataRate", StringValue ("10Gbps"));
   csma.SetChannelAttribute ("Delay", TimeValue (MicroSeconds (1)));
   NetDeviceContainer dev_r_ap = csma.Install (nodes_r_ap);
 
@@ -655,7 +656,7 @@ main (int argc, char *argv[])
   lteHelper->Attach (ueLteDevs.Get (0), enbLteDevs.Get (0));
 
   // Link: PGW <---> Remote node through CSMA
-  csma.SetChannelAttribute ("DataRate", DataRateValue (DataRate ("100Mb/s")));
+  csma.SetChannelAttribute ("DataRate", DataRateValue (DataRate ("10Gb/s")));
   csma.SetChannelAttribute ("Delay", TimeValue (MicroSeconds (1)));
   NodeContainer nodes_r_pgw (nodes.Get (1), pgw);
   NetDeviceContainer dev_r_pgw = csma.Install (nodes_r_pgw);
@@ -778,7 +779,7 @@ main (int argc, char *argv[])
         // set different color to our vehicle
         sumoClient->TraCIAPI::vehicle.setColor (m_vId, red);
         // sumoClient->TraCIAPI::vehicle.setMaxSpeed (m_vId, 13.8); // 50 km/h
-        sumoClient->TraCIAPI::vehicle.setMaxSpeed (m_vId, 25/3.6); 
+        sumoClient->TraCIAPI::vehicle.setMaxSpeed (m_vId, maxVehSpeed/3.6); 
 
       }
     else
@@ -1019,7 +1020,7 @@ main (int argc, char *argv[])
   // ********************************************************
   // Debug: Testing that proper IP addresses are configured
   // ********************************************************
-  wifiPhy.EnablePcap("mp-v2i",nodeAP);  
+  // wifiPhy.EnablePcap("mp-v2i",nodeAP);  
   // wifiPhy.EnablePcapAll ("mp-wifi", true);
   // csma.EnablePcapAll ("mp-csma", true);
   // fdNet.EnablePcapAll ("mp-fd", true);
@@ -1070,7 +1071,9 @@ main (int argc, char *argv[])
     Simulator::Schedule (
           Minutes (1), &ChangeVehicleSpeed, sumoClient, m_vId);
   }
-  
+
+  //Simulator::Schedule (Seconds(iperfStart+2), &set_endpoin_backup, SSPI_IFACE_LTE);
+   
   // Show parameters : 
    std::cout <<  "SimTime: " << simTime << "\n" 
                 << "TcpDump: " << startTcpdump << "\n" 
@@ -1078,6 +1081,7 @@ main (int argc, char *argv[])
                 << "IperfStart: " << iperfStart << "\n" 
                 << "SendCam: " << send_cam << "\n" 
                 << "Verbose: "  << verbose << "\n"
+                << "Initial max Veh speed " << maxVehSpeed << "\n"
                 << "Change Veh Speed " << changeVehMaxSpeed << "\n" 
                 << "Repeat iperf " << iperfReapeat << "\n" 
                 << std::endl; 
