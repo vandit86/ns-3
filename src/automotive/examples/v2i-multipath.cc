@@ -417,7 +417,7 @@ main (int argc, char *argv[])
   bool send_cam = true;
   double m_baseline_prr = 150.0;
   bool m_prr_sup = false;
-  bool print_summary = false; // To print summary at the end of simulation
+  //bool print_summary = false; // To print summary at the end of simulation
 
   std::string sumo_folder = "src/automotive/examples/sumo_files_v2v_map/";
   std::string mob_trace = "cars.rou.xml";
@@ -582,6 +582,14 @@ main (int argc, char *argv[])
   NetDeviceContainer dev_l_ap = 
                 wifi80211p.Install (wifiPhy, wifi80211pMac, nodes_l_ap);
 
+  PacketSocketHelper packetSocket;
+  packetSocket.Install (nodes.Get(0));
+  packetSocket.Install (nodeAP);
+
+  //wifi80211p.EnableLogComponents ();
+
+  wifiPhy.EnablePcap ("mp-v2i",dev_l_ap, true);
+
   // configure CSMA AP <--> REMOTE
   csma.SetChannelAttribute ("DataRate", StringValue ("10Gbps"));
   csma.SetChannelAttribute ("Delay", TimeValue (MicroSeconds (1)));
@@ -621,12 +629,6 @@ main (int argc, char *argv[])
 //       Config::SetDefault ("ns3::LteHelper::EnbComponentCarrierManager",
 //                           StringValue ("ns3::RrComponentCarrierManager"));
 //     }
-
-// //   testing
-//   Config::SetDefault ("ns3::CcHelper::DlBandwidth",  
-//                  UintegerValue (100)); // 5MHz,  100 for 20MHz bandwidth
-//   Config::SetDefault ("ns3::ComponentCarrier::DlBandwidth", 
-//                  UintegerValue (100)); // 5MHz,  100 for 20MHz bandwidth
 
 //     // Adaptive Modulation and Coding
 //   Config::SetDefault ("ns3::LteAmc::AmcModel",
@@ -729,37 +731,18 @@ main (int argc, char *argv[])
   sumoClient->SetAttribute ("SumoAdditionalCmdOptions", 
                         StringValue (sumo_additional_options));
 
-  /*** 3. Create and setup application to run on nodes, app ***/
-  areaSpeedAdvisorClient80211pHelper AreaSpeedAdvisorClient80211pHelper;
-  Ipv4Address remoteHostAddr;
-
-  // PRR supervisor auxilary object (false by def)
-  Ptr<PRRSupervisor> prrSup = NULL;
-  PRRSupervisor prrSupObj (m_baseline_prr);
-  if (m_prr_sup)
-    {
-      prrSup = &prrSupObj;
-      prrSup->setTraCIClient (sumoClient);
-    }
-
-  AreaSpeedAdvisorClient80211pHelper.SetAttribute(
-                        "ServerAddr", Ipv4AddressValue (remoteHostAddr));
-  // pass TraciClient object for accessing sumo in application                        
-  AreaSpeedAdvisorClient80211pHelper.SetAttribute(
-                        "Client", (PointerValue) sumoClient); 
-  AreaSpeedAdvisorClient80211pHelper.SetAttribute(
-                        "PrintSummary", BooleanValue (print_summary));
-  // working in real time ONLY
-  AreaSpeedAdvisorClient80211pHelper.SetAttribute (
-                            "RealTime", BooleanValue (true));
-  AreaSpeedAdvisorClient80211pHelper.SetAttribute(
-                            "CSV", StringValue (csv_name));
-  AreaSpeedAdvisorClient80211pHelper.SetAttribute(
-                            "SendCAM", BooleanValue (send_cam));
-  AreaSpeedAdvisorClient80211pHelper.SetAttribute(
-                            "PRRSupervisor", PointerValue (prrSup));
-
   
+  /*** 7. Setup interface and application for dynamic nodes ***/
+  simpleCAMSenderHelper SimpleCAMSenderHelper;
+  SimpleCAMSenderHelper.SetAttribute ("RealTime", BooleanValue(true));
+  SimpleCAMSenderHelper.SetAttribute ("Client", (PointerValue) sumoClient);
+  SimpleCAMSenderHelper.SetAttribute("IsRSU", BooleanValue(true));
+
+  // CA service install on RSU
+  ApplicationContainer simpleCamSenderApp = SimpleCAMSenderHelper.Install (nodeAP);
+  simpleCamSenderApp.Start (Seconds (0.0));
+  simpleCamSenderApp.Stop (Seconds (simTime - 0.1) - Simulator::Now ());
+
   /* callback function for node creation, return newlly created Node  */
   std::function<Ptr<Node> ()> setupNewWifiNode = [&] () -> Ptr<Node> {
     
@@ -771,16 +754,21 @@ main (int argc, char *argv[])
     if (nodeCounter == 0) 
       {      
         includedNode = nodes.Get (0);
-        libsumo::TraCIColor red;
-        red.r = 255;
-        red.g = 0;
-        red.b = 0;
-        red.a = 255;
+
         // set different color to our vehicle
+        libsumo::TraCIColor red;
+        red.r = 255; red.g = 0; red.b = 0; red.a = 255;
         sumoClient->TraCIAPI::vehicle.setColor (m_vId, red);
+        
         // sumoClient->TraCIAPI::vehicle.setMaxSpeed (m_vId, 13.8); // 50 km/h
         sumoClient->TraCIAPI::vehicle.setMaxSpeed (m_vId, maxVehSpeed/3.6); 
 
+        /* Install CAM service Application  */
+        SimpleCAMSenderHelper.SetAttribute("IsRSU", BooleanValue(false)); 
+        ApplicationContainer setupAppSimpleSender = 
+                                SimpleCAMSenderHelper.Install (includedNode);
+        setupAppSimpleSender.Start (Seconds (0.0));
+        setupAppSimpleSender.Stop (Seconds (simTime - 0.1) - Simulator::Now ());
       }
     else
       {
@@ -980,7 +968,9 @@ main (int argc, char *argv[])
   addBackAddress (pgw, ueLteDevs.Get (0), Ipv4Address ("11.0.0.2"));
 
   // **************************************************************************
+  // **************************************************************************
   //                        Configure APPLICATIONS
+  // **************************************************************************
   // **************************************************************************
   
   /*** 6. Create and Setup application for the server ***/
@@ -1010,7 +1000,7 @@ main (int argc, char *argv[])
 
   uint32_t packetSize = 10; // bytes  (+64 bytes)
   uint32_t numPackets = 1;
-  double interval = 100.0; // milliseconds send pack interval 
+  double interval = 10000.0; // milliseconds send pack interval 
 
   Simulator::ScheduleWithContext (source->GetNode ()->GetId (),
                                   Seconds (1.0), &GenerateTraffic,
@@ -1020,7 +1010,7 @@ main (int argc, char *argv[])
   // ********************************************************
   // Debug: Testing that proper IP addresses are configured
   // ********************************************************
-  // wifiPhy.EnablePcap("mp-v2i",nodeAP);  
+  // wifiPhy.EnablePcap("mp-v2i",nodes);  
   // wifiPhy.EnablePcapAll ("mp-wifi", true);
   // csma.EnablePcapAll ("mp-csma", true);
   // fdNet.EnablePcapAll ("mp-fd", true);

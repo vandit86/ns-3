@@ -1,7 +1,6 @@
 #ifndef SIMPLECAMSENDER_H
 #define SIMPLECAMSENDER_H
 
-#include "ns3/gps-tc.h"
 #include "ns3/traci-client.h"
 #include "ns3/application.h"
 #include "ns3/asn_utils.h"
@@ -47,10 +46,11 @@ private:
   virtual void StartApplication (void);
   virtual void StopApplication (void);
 
-  Ptr<GPSTraceClient> m_gps_tc_client; //!< GPS trace client
+  Ptr<TraciClient> m_client; //!< TraCI SUMO client
 
   std::string m_id; //!< vehicle id
   bool m_real_time; //!< To decide wheter to use realtime scheduler
+  bool m_is_rsu;    // is this node is stationary RSU 
 
   EventId m_sendCamEvent; //!< Event to send the CAM
 
