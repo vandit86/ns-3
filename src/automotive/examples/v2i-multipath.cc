@@ -51,8 +51,8 @@ using namespace ns3;
 /* we run in real-time , so no loggin is avilable  */
 //NS_LOG_COMPONENT_DEFINE ("MpFdExample");
 
-#define MAX_VEH_SPEED 60 // 60 km/h
-#define MIN_VEH_SPEED 10  // 10 Km/h
+#define MAX_VEH_SPEED 120 // km/h
+#define MIN_VEH_SPEED 40  // Km/h
 // Global variables for use in callbacks.
 double g_signalDbm;
 double average_RSU_conn_time; 
@@ -122,20 +122,19 @@ JitterMonitor (Ptr<RealtimeSimulatorImpl> rt)
   Simulator::Schedule (MilliSeconds (100), &JitterMonitor, rt);
 }
 
+/**
+ * @brief Generate UDP beacons on RSU if CAM service is disabled 
+ * 
+ * @param socket broadcast socket 
+ * @param pktInterval interval im ms (default 100?)
+ */
+
 static void 
-GenerateTraffic (Ptr<Socket> socket, uint32_t pktSize,
-                             uint32_t pktCount, Time pktInterval )
+GenerateTraffic (Ptr<Socket> socket, Time pktInterval )
 {
-  if (pktCount > 0)
-    {
-      socket->Send (Create<Packet> (pktSize));
-      Simulator::Schedule (pktInterval, &GenerateTraffic,
-                           socket, pktSize,pktCount, pktInterval);
-    }
-  else
-    {
-      socket->Close ();
-    }
+  uint32_t pktSize = 10; // bytes  (+64 bytes)   
+  socket->Send (Create<Packet> (pktSize));
+  Simulator::Schedule (pktInterval, &GenerateTraffic, socket, pktInterval);
 }
 
 /**
@@ -165,7 +164,7 @@ PrintVehicleData ( Ptr<TraciClient> sumoClient, const std::string vId){
  * @param vehId 
  */
 
-void ChangeVehicleSpeed (Ptr<TraciClient> sumoClient , std::string vehId){
+void ChangeVehicleSpeed (Ptr<TraciClient> sumoClient , std::string vehId, uint32_t interval){
   
   Ptr<UniformRandomVariable> x = CreateObject<UniformRandomVariable> ();
   x->SetAttribute ("Min", DoubleValue (MIN_VEH_SPEED));
@@ -179,8 +178,8 @@ void ChangeVehicleSpeed (Ptr<TraciClient> sumoClient , std::string vehId){
   sumoClient->TraCIAPI::vehicle.setMaxSpeed(vehId, newMaxSpeed/3.6); 
 
   // TODO: refactor rand  
-  Simulator::Schedule (Minutes(1 + rand()/RAND_MAX), 
-                        &ChangeVehicleSpeed, sumoClient, vehId);
+  Simulator::Schedule (Seconds(interval), 
+                        &ChangeVehicleSpeed, sumoClient, vehId, interval);
 
 }
 
@@ -393,14 +392,14 @@ main (int argc, char *argv[])
   // Global configurations
   // ****************************************
 
-  bool startTcpdump = false;    // capture traffic on namespace 
   bool sumo_gui = false;        // no SUMO GUI by defauls 
   double sumo_updates = 0.01;   // sumo update rate 
   std::string csv_name;
   bool verbose = true ;
-  double maxVehSpeed = 25.0 ;    // initial max veh speed [km/h]
-  bool changeVehMaxSpeed = false;// change periodicaly veh max speed 
-  bool iperfReapeat = false ;    // repeat iperf sessions  
+  double maxVehSpeed = 25.0 ;     // initial max veh speed [km/h]
+  uint32_t changeVehMaxSpeed = 0; // change periodicaly veh max speed, the interval in ms
+  bool iperfReapeat = false ;     // repeat iperf sessions  
+  bool startTcpdump = false;      // capture traffic on namespace 
 
   /* MPTCP NETLINK PATH MANAGER */
   
@@ -410,13 +409,12 @@ main (int argc, char *argv[])
   g_signalDbm = -85;              // init value rssi (dBm)
   average_RSU_conn_time = 0.0;   // to calculate av connection time on RSU
   
-  /*  MS-VAN3T configuration */
-  // Disabling this option turns off the whole V2X application
-  // sumo id of our first vehicle
-  std::string m_vId = "veh1"; 
-  bool send_cam = true;
-  double m_baseline_prr = 150.0;
-  bool m_prr_sup = false;
+  /*****  MS-VAN3T configuration *****/
+
+  std::string m_vId = "veh1";     // sumo id of our first vehicle
+  bool send_cam = true;           // enable CAM service on vehicles and RSU
+  // double m_baseline_prr = 150.0;
+  // bool m_prr_sup = false;
   //bool print_summary = false; // To print summary at the end of simulation
 
   std::string sumo_folder = "src/automotive/examples/sumo_files_v2v_map/";
@@ -424,10 +422,6 @@ main (int argc, char *argv[])
   std::string sumo_config = 
                 "src/automotive/examples/sumo_files_v2v_map/map.sumo.cfg";
 
-  // bool aggregate_out = false;
-  // bool vehicle_vis = false;
-
-  // TODO : push sumo path folder/files declaration up to here  
   //
   // Allow the user to override any of the defaults at run-time, via 
   // command-line arguments
@@ -446,33 +440,33 @@ main (int argc, char *argv[])
                         startTcpdump); 
   cmd.AddValue ("verbose", "Print debug data every second", verbose);
   cmd.AddValue ("iperfRepeat", "Repeat iperf sessions umtil simulation end, the time of sessio is random value [10:100]sec", iperfReapeat); 
-  cmd.AddValue ("changeVehMaxSpeed", "Change vehicle maximum speed randomly from [10:100]km/h", changeVehMaxSpeed); 
+  cmd.AddValue ("changeVehMaxSpeed", "The interval in ms to change periodicaly vehicles max speed randomly from [40:120]km/h don\'t change if 0", changeVehMaxSpeed); 
   cmd.AddValue ("maxSpeed", "initial max veh speed [km/h]", maxVehSpeed); 
   cmd.AddValue ("sumo-folder","Position of sumo config files",sumo_folder);
   cmd.AddValue ("mob-trace", "Name of the mobility trace file", mob_trace);
   cmd.AddValue ("sumo-config", "Location and name of SUMO configuration file", 
                                                  sumo_config);
-  // cmd.AddValue ("csv-log", "Name of the CSV log file", csv_name);
-  // cmd.AddValue ("summary", 
-  //               "Print a summary for each vehicle at the end of the simulation",
-  //               print_summary);
-  //  cmd.AddValue ("vehicle-visualizer", 
-  //  "Activate the web-based vehicle visualizer for ms-van3t", 
-  //  vehicle_vis);
-  
   cmd.AddValue ("send-cam",
                 "Turn on or off the transmission of CAMs, thus turning on or off the whole V2X application",  send_cam);
 
-//   cmd.AddValue ("csv-log-cumulative",  
-//                     "Name of the CSV log file for the cumulative (average) \
-//                     PRR and latency data", 
-//                     csv_name_cumulative);
-  
-// cmd.AddValue ("netstate-dump-file", 
-//     "Name of the SUMO netstate-dump file containing the vehicle-related \
-//      information throughout the whole simulation", sumo_netstate_file_name);
-  cmd.AddValue ("baseline", "Baseline for PRR calculation", m_baseline_prr);
-  cmd.AddValue ("prr-sup", "Use the PRR supervisor or not", m_prr_sup);
+  // cmd.AddValue ("csv-log", "Name of the CSV log file", csv_name);
+  // cmd.AddValue ("summary",
+  //               "Print a summary for each vehicle at the end of the simulation",
+  //               print_summary);
+  //  cmd.AddValue ("vehicle-visualizer",
+  //  "Activate the web-based vehicle visualizer for ms-van3t",
+  //  vehicle_vis);
+
+  //   cmd.AddValue ("csv-log-cumulative",
+  //                     "Name of the CSV log file for the cumulative (average) \
+  //                     PRR and latency data",
+  //                     csv_name_cumulative);
+
+  // cmd.AddValue ("netstate-dump-file",
+  //     "Name of the SUMO netstate-dump file containing the vehicle-related \
+  //      information throughout the whole simulation", sumo_netstate_file_name);
+  // cmd.AddValue ("baseline", "Baseline for PRR calculation", m_baseline_prr);
+  // cmd.AddValue ("prr-sup", "Use the PRR supervisor or not", m_prr_sup);
 
   cmd.Parse (argc, argv);
 
@@ -526,6 +520,7 @@ main (int argc, char *argv[])
   // ****************************************
   inet.Install (nodeAP);
   inet.Install (nodes);
+ 
 
   // **************************************************************************
   //                      MOBILITY MODEL
@@ -577,18 +572,17 @@ main (int argc, char *argv[])
   wifi80211p.SetRemoteStationManager ("ns3::ConstantRateWifiManager", 
                                         "DataMode", StringValue (phyMode), 
                                         "ControlMode", StringValue (phyMode));
-
+  
+  // NetDeviceContainer dev_wifi_l_ap = 
+  //               wifi80211p.Install (wifiPhy, wifi80211pMac, nodes_l_ap);
+  
   // Install devices on nodes from path #1
   NetDeviceContainer dev_l_ap = 
                 wifi80211p.Install (wifiPhy, wifi80211pMac, nodes_l_ap);
 
-  PacketSocketHelper packetSocket;
-  packetSocket.Install (nodes.Get(0));
-  packetSocket.Install (nodeAP);
-
-  //wifi80211p.EnableLogComponents ();
-
-  wifiPhy.EnablePcap ("mp-v2i",dev_l_ap, true);
+  // index of interfaces to use in CAM service 
+  uint32_t ifIdxVeh =  dev_l_ap.Get(0)->GetIfIndex();
+  uint32_t ifIdxRsu =  dev_l_ap.Get(1)->GetIfIndex();
 
   // configure CSMA AP <--> REMOTE
   csma.SetChannelAttribute ("DataRate", StringValue ("10Gbps"));
@@ -629,10 +623,6 @@ main (int argc, char *argv[])
 //       Config::SetDefault ("ns3::LteHelper::EnbComponentCarrierManager",
 //                           StringValue ("ns3::RrComponentCarrierManager"));
 //     }
-
-//     // Adaptive Modulation and Coding
-//   Config::SetDefault ("ns3::LteAmc::AmcModel",
-//                         EnumValue (LteAmc::PiroEW2010)); 
 
   // get LTE / EPC helpers
   Ptr<LteHelper> lteHelper = CreateObject<LteHelper> ();
@@ -690,16 +680,19 @@ main (int argc, char *argv[])
   if (obuNodes.GetN () > 0)
     {
       mobility.Install (obuNodes); // install mobility model
-      //inet.Install (obuNodes);      // add inet stack
-      
+
       //install 802.11p devices
       NetDeviceContainer obuNetDevices =
           wifi80211p.Install (wifiPhy, wifi80211pMac, obuNodes); 
+      
       /* Give packet socket powers to nodes (otherwise, 
         if the app tries to create a PacketSocket, 
         CreateSocket will end up with a segmentation fault */
       PacketSocketHelper packetSocket;
       packetSocket.Install (obuNodes);
+
+      // OR remove 2 lines above and uncomment this lines  
+      // inet.Install (obuNodes);
     }
 
   /*** 2. Configure sumo cliente  ***/
@@ -732,60 +725,60 @@ main (int argc, char *argv[])
                         StringValue (sumo_additional_options));
 
   
-  /*** 7. Setup interface and application for dynamic nodes ***/
+  /***  Setup and start CA service on RSU  *****/ 
   simpleCAMSenderHelper SimpleCAMSenderHelper;
   SimpleCAMSenderHelper.SetAttribute ("RealTime", BooleanValue(true));
   SimpleCAMSenderHelper.SetAttribute ("Client", (PointerValue) sumoClient);
   SimpleCAMSenderHelper.SetAttribute("IsRSU", BooleanValue(true));
-
-  // CA service install on RSU
-  ApplicationContainer simpleCamSenderApp = SimpleCAMSenderHelper.Install (nodeAP);
-  simpleCamSenderApp.Start (Seconds (0.0));
-  simpleCamSenderApp.Stop (Seconds (simTime - 0.1) - Simulator::Now ());
+  SimpleCAMSenderHelper.SetAttribute("Interface", IntegerValue(ifIdxRsu));
+  
+  if (send_cam) {
+      ApplicationContainer simpleCamSenderApp = SimpleCAMSenderHelper.Install (nodeAP);
+      simpleCamSenderApp.Start (Seconds (0.0));
+      simpleCamSenderApp.Stop (Seconds (simTime - 0.1) - Simulator::Now ());
+  }
 
   /* callback function for node creation, return newlly created Node  */
   std::function<Ptr<Node> ()> setupNewWifiNode = [&] () -> Ptr<Node> {
-    
     Ptr<Node> includedNode;
-    /* 
-        first time call this function
-        veh1 is our UE connected to Left Namespace
-    */ 
-    if (nodeCounter == 0) 
-      {      
+
+    /* first time call this function veh1 is our UE */
+    if (nodeCounter == 0)
+      {
         includedNode = nodes.Get (0);
 
         // set different color to our vehicle
         libsumo::TraCIColor red;
         red.r = 255; red.g = 0; red.b = 0; red.a = 255;
         sumoClient->TraCIAPI::vehicle.setColor (m_vId, red);
-        
-        // sumoClient->TraCIAPI::vehicle.setMaxSpeed (m_vId, 13.8); // 50 km/h
-        sumoClient->TraCIAPI::vehicle.setMaxSpeed (m_vId, maxVehSpeed/3.6); 
-
-        /* Install CAM service Application  */
-        SimpleCAMSenderHelper.SetAttribute("IsRSU", BooleanValue(false)); 
-        ApplicationContainer setupAppSimpleSender = 
-                                SimpleCAMSenderHelper.Install (includedNode);
-        setupAppSimpleSender.Start (Seconds (0.0));
-        setupAppSimpleSender.Stop (Seconds (simTime - 0.1) - Simulator::Now ());
+        sumoClient->TraCIAPI::vehicle.setMaxSpeed (m_vId, maxVehSpeed / 3.6);
       }
     else
       {
         // get from the node pool (starting from 0)
-        includedNode = obuNodes.Get (nodeCounter - 1); 
+        includedNode = obuNodes.Get (nodeCounter - 1);
       }
+
+    /***  Setup and start CA service on Vehicles  *****/
+    simpleCAMSenderHelper SimpleCAMHelper;
+    SimpleCAMHelper.SetAttribute ("RealTime", BooleanValue (true));
+    SimpleCAMHelper.SetAttribute ("Client", (PointerValue) sumoClient);
+
+    if (nodeCounter == 0)
+      SimpleCAMHelper.SetAttribute ("Interface", IntegerValue (ifIdxVeh));
+
+    /* Install CAM service Application on vehicles  */
+    if (send_cam)
+      {
+        ApplicationContainer setupAppSimpleSender = SimpleCAMHelper.Install (includedNode);
+        setupAppSimpleSender.Start (Seconds (0.0));
+        setupAppSimpleSender.Stop (Seconds (simTime - 0.1) - Simulator::Now ());
+      }
+
+    std::cout << "Created Vehicle ID : " << nodeCounter << ", Node ID : " << includedNode->GetId ()
+              << std::endl;
+
     nodeCounter++; //
-    
-    std::cout   << "Created Vehicle ID : " << nodeCounter << ", Node ID : " 
-                << includedNode->GetId () << std::endl;
-
-    // /* Install Application on all vehicles*/
-    // ApplicationContainer ClientApp = 
-    //             AreaSpeedAdvisorClient80211pHelper.Install (includedNode);
-    // ClientApp.Start (Seconds (0.0));
-    // ClientApp.Stop (ns3::Seconds (simTime) - Simulator::Now () - Seconds (0.1));
-
     return includedNode;
   };
 
@@ -973,45 +966,30 @@ main (int argc, char *argv[])
   // **************************************************************************
   // **************************************************************************
   
-  /*** 6. Create and Setup application for the server ***/
-  // areaSpeedAdvisorServer80211pHelper AreaSpeedAdvisorServer80211pHelper;
-  // AreaSpeedAdvisorServer80211pHelper.SetAttribute ("Client", (PointerValue) sumoClient);
-  // AreaSpeedAdvisorServer80211pHelper.SetAttribute ("RealTime", BooleanValue(true));
-  //AreaSpeedAdvisorServer80211pHelper.SetAttribute ("AggregateOutput", BooleanValue(true));
 
-  // need on RSU to generate CAM 
-  // ApplicationContainer AppServer = AreaSpeedAdvisorServer80211pHelper.Install (nodeAP);
-  // AppServer.Start (Seconds (1.0));
-  // AppServer.Stop (ns3::Seconds (simTime) - Simulator::Now () - Seconds (0.1));
+  /* Broadcast UDP packets by RSU if CAM service is disabled*/ 
 
+  if (!send_cam){
 
-  /* GENERATE  UDP TRAFFIC ON RSU */ 
-  TypeId tid = TypeId::LookupByName ("ns3::UdpSocketFactory");
-  // Ptr<Socket> recvSink = Socket::CreateSocket (nodeAP.Get (0), tid);
-  // InetSocketAddress local = InetSocketAddress (Ipv4Address::GetAny (), 80);
-  // recvSink->Bind (local);
-  //recvSink->SetRecvCallback (MakeCallback (&ReceivePacket));
+      TypeId tid = TypeId::LookupByName ("ns3::UdpSocketFactory");
+      Ptr<Socket> source = Socket::CreateSocket (nodeAP.Get (0), tid);
+      InetSocketAddress remote = InetSocketAddress (Ipv4Address ("255.255.255.255"), 80);
+      source->SetAllowBroadcast (true);
+      source->Connect (remote);
 
-  Ptr<Socket> source = Socket::CreateSocket (nodeAP.Get (0), tid);
-  InetSocketAddress remote = InetSocketAddress (Ipv4Address ("255.255.255.255"), 80);
-  source->SetAllowBroadcast (true);
-  source->Connect (remote);
+      double interval = 100.0; // milliseconds send pack interval
 
-
-  uint32_t packetSize = 10; // bytes  (+64 bytes)
-  uint32_t numPackets = 1;
-  double interval = 10000.0; // milliseconds send pack interval 
-
-  Simulator::ScheduleWithContext (source->GetNode ()->GetId (),
-                                  Seconds (1.0), &GenerateTraffic,
-                                  source, packetSize, numPackets, MilliSeconds(interval));
-
+      Simulator::ScheduleWithContext (source->GetNode ()->GetId (), Seconds (1.0), &GenerateTraffic,
+                                      source, MilliSeconds (interval));
+  }
 
   // ********************************************************
   // Debug: Testing that proper IP addresses are configured
   // ********************************************************
-  // wifiPhy.EnablePcap("mp-v2i",nodes);  
-  // wifiPhy.EnablePcapAll ("mp-wifi", true);
+  wifiPhy.EnablePcap("mp-v2i",nodes);  
+  //wifiPhy.EnablePcap("mp-v2i",nodeAP);  
+  //wifiPhy.EnablePcap("mp-v2i",obuNodes);  
+  //wifiPhy.EnablePcapAll ("mp-wifi", true);
   // csma.EnablePcapAll ("mp-csma", true);
   // fdNet.EnablePcapAll ("mp-fd", true);
 
@@ -1059,7 +1037,7 @@ main (int argc, char *argv[])
 
   if (changeVehMaxSpeed){
     Simulator::Schedule (
-          Minutes (1), &ChangeVehicleSpeed, sumoClient, m_vId);
+          Seconds (changeVehMaxSpeed), &ChangeVehicleSpeed, sumoClient, m_vId, changeVehMaxSpeed);
   }
 
   //Simulator::Schedule (Seconds(iperfStart+2), &set_endpoin_backup, SSPI_IFACE_LTE);

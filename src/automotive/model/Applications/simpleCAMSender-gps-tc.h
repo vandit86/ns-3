@@ -50,7 +50,8 @@ private:
 
   std::string m_id; //!< vehicle id
   bool m_real_time; //!< To decide wheter to use realtime scheduler
-  bool m_is_rsu;    // is this node is stationary RSU 
+  bool m_is_rsu = false;    // is this node is stationary RSU 
+  uint32_t m_iface = 0; // interface used when send CAM (default 0)
 
   EventId m_sendCamEvent; //!< Event to send the CAM
 

@@ -21,22 +21,9 @@
 #include "simpleCAMSender-gps-tc.h"
 
 #include "ns3/CAM.h"
-#include "ns3/DENM.h"
 #include "ns3/socket.h"
 #include "ns3/network-module.h"
 
-
-// #include "ns3/CAM.h"
-// #include "ns3/DENM.h"
-// #include "ns3/Seq.hpp"
-// #include "ns3/Getter.hpp"
-// #include "ns3/Setter.hpp"
-// #include "ns3/Encoding.hpp"
-// #include "ns3/SetOf.hpp"
-// #include "ns3/SequenceOf.hpp"
-// #include "ns3/socket.h"
-// #include "ns3/btpdatarequest.h"
-// #include "ns3/network-module.h"
 
 namespace ns3
 {
@@ -66,7 +53,12 @@ namespace ns3
             "Is this node stationary RSU",
             BooleanValue(false),
             MakeBooleanAccessor (&simpleCAMSender::m_is_rsu),
-            MakeBooleanChecker ());
+            MakeBooleanChecker ())
+        .AddAttribute ("Interface",
+            "number of interface to use",
+            IntegerValue(0),
+            MakeIntegerAccessor (&simpleCAMSender::m_iface),
+            MakeIntegerChecker<uint32_t>());
         return tid;
   }
 
@@ -74,7 +66,6 @@ namespace ns3
   {
     NS_LOG_FUNCTION(this);
     m_client = nullptr;
-
     m_cam_sent = 0;
   }
 
@@ -110,13 +101,15 @@ namespace ns3
     // if it's stationary RSU don't use TraCI to get ID 
     if (m_is_rsu){
 
+      m_id = "rsu-" + std::to_string (this->GetNode()->GetId()); 
+
     }
     else {
       m_id = m_client->GetVehicleId (this->GetNode ()); // get veh id string 
     }
      
     /** 
-     * Create the socket for TX and RX  to send CAMs and receive DENMs 
+     * Create the socket for TX and RX  to send CAMs 
     */
     TypeId tid = TypeId::LookupByName ("ns3::PacketSocketFactory");
     m_socket = Socket::CreateSocket (GetNode (), tid);
@@ -125,45 +118,33 @@ namespace ns3
     m_btp = CreateObject <btp>();
     m_geoNet = CreateObject <GeoNet>();
     m_btp->setGeoNet(m_geoNet);
-    //m_denService.setBTP(m_btp);
     m_caService.setBTP(m_btp);
-
-    /****/
 
     /* Bind the socket to local address */
     PacketSocketAddress local;
-    local.SetSingleDevice (GetNode ()->GetDevice (0)->GetIfIndex ());
-    local.SetPhysicalAddress (GetNode ()->GetDevice (0)->GetAddress ()); 
+    local.SetSingleDevice (GetNode ()->GetDevice (m_iface)->GetIfIndex ());
+    local.SetPhysicalAddress (GetNode ()->GetDevice (m_iface)->GetAddress ()); 
     local.SetProtocol (0x8947); // Set GeoNetworking Protocol
+
 
     if (m_socket->Bind (local) == -1)
     {
-      NS_FATAL_ERROR ("Failed to bind client socket");
+      NS_FATAL_ERROR ("Failed to bind client socket on CAM service");
     }
 
     /* Set the socket to broadcast */
     PacketSocketAddress remote;
-    remote.SetSingleDevice (GetNode ()->GetDevice (0)->GetIfIndex ());
-    remote.SetPhysicalAddress (GetNode ()->GetDevice (0)->GetBroadcast ());
+    remote.SetSingleDevice (GetNode ()->GetDevice (m_iface)->GetIfIndex ());
+    remote.SetPhysicalAddress (GetNode ()->GetDevice (m_iface)->GetBroadcast ());
     remote.SetProtocol (0x8947);
 
     m_socket->Connect (remote);
 
-    /*************/
-
-    /* Set sockets, callback and station properties in DENBasicService */
-    //m_denService.setSocketTx (m_socket);
-    //m_denService.setSocketRx (m_socket);
-
-    // m_denService.setStationProperties (std::stol(m_id), StationType_passengerCar);
-
-    // m_denService.addDENRxCallback (std::bind(&simpleCAMSender::receiveDENM,this,std::placeholders::_1,std::placeholders::_2));
-    // m_denService.setRealTime (m_real_time);
-
     if (m_is_rsu){
         /* Set callback and station properties in CABasicService 
         // (which will only be used to receive CAMs) ??  */
-        m_caService.setStationProperties (777888999, StationType_roadSideUnit);
+        m_caService.setStationProperties (999000+(this->GetNode()->GetId()), 
+                                                  StationType_roadSideUnit);
         
         // Set the RSU position in the CA and DEN basic service (mandatory for any RSU object)
         // As the position must be specified in (lat, lon), we must take it from the 
@@ -173,11 +154,15 @@ namespace ns3
         libsumo::TraCIPosition rsuPos = m_client->TraCIAPI::simulation.convertXYtoLonLat (
             mob->GetPosition ().x, mob->GetPosition ().y);
         m_caService.setFixedPositionRSU (rsuPos.y, rsuPos.x);
+        
+        // interval of cam generation (ms)
+        m_caService.changeRSUGenInterval(100); 
     }
     else {
         m_caService.setStationProperties (1000 + std::stol (m_id.substr (3)),
                                           StationType_passengerCar);
-        // Somthing for GeoNet functionality (TraCI VDP )
+        
+        // Vehicle Data Provider nedded for CAM
         VDP *traci_vdp = new VDPTraCI (m_client, m_id);
         m_caService.setVDP (traci_vdp);
     }
@@ -188,11 +173,6 @@ namespace ns3
     m_caService.addCARxCallback (std::bind(&simpleCAMSender::receiveCAM,this,
                                 std::placeholders::_1,std::placeholders::_2));
     m_caService.setRealTime (m_real_time);
-
-    //VDP* gpstc_vdp = new VDPGPSTraceClient(m_gps_tc_client,m_id);
-    // m_caService.setVDP(gpstc_vdp);
-    // m_denService.setVDP(gpstc_vdp);
-
 
     /* Schedule CAM dissemination */
     std::srand(Simulator::Now().GetNanoSeconds ());
@@ -224,12 +204,26 @@ namespace ns3
   void
   simpleCAMSender::receiveCAM (asn1cpp::Seq<CAM> cam, Address from)
   {
-    /* Implement CAM strategy here */
-    std::cout <<"VehicleID: " << m_id
-            <<" | Rx CAM from "<<cam->header.stationID
-            <<" | Remote vehicle position: ("<<asn1cpp::getField(cam->cam.camParameters.basicContainer.referencePosition.latitude,double)/DOT_ONE_MICRO<<","
-            <<asn1cpp::getField(cam->cam.camParameters.basicContainer.referencePosition.longitude,double)/DOT_ONE_MICRO<<")"<<std::endl;
 
+    // // print only cam my veh receive
+    // if (m_id == "veh1" && cam->header.stationID != 1001)
+    //   {
+    //     std::cout << "get addr " << GetNode ()->GetDevice (0)->GetAddress () << std::endl; 
+    //     /* Implement CAM strategy here */
+    //     std::cout << "VehicleID: " << m_id << " | Rx CAM from " << cam->header.stationID
+    //               // << " | Remote vehicle position: ("
+    //               // << asn1cpp::getField (
+    //               //        cam->cam.camParameters.basicContainer.referencePosition.latitude, double) /
+    //               //        DOT_ONE_MICRO
+    //               // << ","
+    //               // << asn1cpp::getField (
+    //               //        cam->cam.camParameters.basicContainer.referencePosition.longitude,
+    //               //        double) /
+    //               //        DOT_ONE_MICRO
+    //               // << ")" 
+                  
+    //               << std::endl;
+    //   }
   }
 
   void

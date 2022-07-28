@@ -200,7 +200,8 @@ main (int argc, char *argv[])
   //wifi80211p.EnableLogComponents ();
 
   wifiPhy.EnablePcap ("v2i-test",netDevices);
-  /* Give packet socket powers to nodes (otherwise, if the app tries to create a PacketSocket, CreateSocket will end up with a segmentation fault */
+  /* Give packet socket powers to nodes (otherwise, if the app tries to create a PacketSocket, 
+  CreateSocket will end up with a segmentation fault */
   PacketSocketHelper packetSocket;
   packetSocket.Install (obuNodes);
 
