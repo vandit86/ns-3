@@ -20,13 +20,14 @@ def build(bld):
         'helper/areaSpeedAdvisorServerLTE-helper.cc',
         'helper/emergencyVehicleAlert-helper.cc',
         'helper/v2xEmulator-helper.cc',
-        'helper/simpleCAMSender-helper.cc',
+        'helper/simpleCAMSender-helper.cc', 
 
         'model/Applications/areaSpeedAdvisorClient80211p.cc',
         'model/Applications/areaSpeedAdvisorServer80211p.cc',
         'model/Applications/areaSpeedAdvisorClientLTE.cc',
         'model/Applications/areaSpeedAdvisorServerLTE.cc',
-        'model/Applications/simpleCAMSender-gps-tc.cc',
+        # 'model/Applications/simpleCAMSender-gps-tc.cc',
+        'model/Applications/simpleCAMSender.cc',
 
         'model/Applications/emergencyVehicleAlert.cc',
         'model/Facilities/denBasicService.cc',
@@ -290,7 +291,8 @@ def build(bld):
         'model/Applications/areaSpeedAdvisorClientLTE.h',
         'model/Applications/areaSpeedAdvisorServerLTE.h',
         'model/Applications/emergencyVehicleAlert.h',
-        'model/Applications/simpleCAMSender-gps-tc.h',
+        # 'model/Applications/simpleCAMSender-gps-tc.h',
+        'model/Applications/simpleCAMSender.h',
 
         'model/Facilities/denBasicService.h',
         'model/Facilities/denData.h',

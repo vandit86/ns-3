@@ -18,7 +18,7 @@
  *  Marco Malinverno, Politecnico di Torino (marco.malinverno1@gmail.com)
  *  Francesco Raviglione, Politecnico di Torino (francescorav.es483@gmail.com)
 */
-#include "simpleCAMSender-gps-tc.h"
+#include "simpleCAMSender.h"
 
 #include "ns3/CAM.h"
 #include "ns3/socket.h"
