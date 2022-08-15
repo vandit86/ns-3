@@ -64,5 +64,8 @@
         "cinttypes": "cpp",
         "typeinfo": "cpp",
         "hash_set": "cpp"
-    }
+    },
+    "editor.rulers": [
+        80
+    ]
 }

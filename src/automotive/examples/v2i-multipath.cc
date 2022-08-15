@@ -53,6 +53,7 @@ using namespace ns3;
 
 #define MAX_VEH_SPEED 120 // km/h
 #define MIN_VEH_SPEED 40  // Km/h
+#define MAX_JITTER    100 // ms
 // Global variables for use in callbacks.
 double g_signalDbm;
 double average_RSU_conn_time; 
@@ -61,8 +62,6 @@ double simTime = 60;          // sim time, 1 min by default
 //double g_noiseDbmAvg;
 //uint32_t g_samples;
 
-
-
 /** NS-3 connection glob vars **/
 
 /* we need to save information about iface connection state (in backup or not)
@@ -70,9 +69,7 @@ double simTime = 60;          // sim time, 1 min by default
     size = num ifaces + 1 
 */
 bool sspi_iface_backup[3] = {false};
-
-// control subflows from userspace   
-bool use_mptcp_pm = false ;     // use mptcpd path manager or not        
+        
 int mptcpdFd;      // file descriptor to interact with mptcpd             
 
 /**
@@ -118,8 +115,11 @@ JitterMonitor (Ptr<RealtimeSimulatorImpl> rt)
   Time mc = rt->Now ();
   Time ts = rt->RealtimeNow ();
   Time j = (ts >= mc) ? ts - mc : mc - ts;
-  std::cout << j.GetMicroSeconds () << std::endl;
-  Simulator::Schedule (MilliSeconds (100), &JitterMonitor, rt);
+  int64_t jitter = j.GetMilliSeconds(); 
+  if (jitter > MAX_JITTER){
+      std::cout << "! JITTER ! : " << jitter << std::endl;
+  }
+  Simulator::Schedule (MilliSeconds (500), &JitterMonitor, rt);
 }
 
 /**
@@ -217,7 +217,8 @@ getNumberVeh (std::string path)
 
 /**
  * @brief write to mptcpd-plugin path manager, requires sudo ? 
- * @param msg struct sspi_ns3_message to send to our mptcpd through FIFO 
+ * @param msg struct sspi_ns3_message to send to our mptcpd through FIFO
+ * @param mptcpdFd file descriptor to write data to mptcpd  
  */
 void
 mptcpdWrite (struct sspi_ns3_message msg)
@@ -269,7 +270,8 @@ void IperfRepeat ()
   duration = (duration > time_left-5 )? time_left - 5 : duration; 
   if (duration < 0 ) return;  
   
-  struct sspi_ns3_message sspi_msg = {.type = SSPI_CMD_IPERF_START, .value = duration};
+  struct sspi_ns3_message sspi_msg = {.type = SSPI_CMD_IPERF_START, 
+                                      .value = duration};
   mptcpdWrite (sspi_msg); 
   std::cout << "New iperf session duration: " << duration << std::endl; 
   
@@ -352,7 +354,7 @@ MonitorSniffRx (Ptr<const Packet> packet, uint16_t channelFreqMhz, WifiTxVector 
   double alpha = 0.85; // alpha value 
   g_signalDbm = alpha * signalNoise.signal + (1-alpha)*g_signalDbm; 
   
-  if (!use_mptcp_pm) return ; // just monitor and return if not enabled 
+  //if (!use_mptcp_pm) return ; // just monitor and return if not enabled 
 
   //CHACKING SIGNAL RSSI VALUE 
   if (g_signalDbm < (RSSI_T) && !sspi_iface_backup[SSPI_IFACE_WLAN]) {
@@ -402,17 +404,17 @@ main (int argc, char *argv[])
   bool startTcpdump = false;      // capture traffic on namespace 
 
   /* MPTCP NETLINK PATH MANAGER */
-  
-  int iperf_duration = 0;          // start iperf session time is sec 
+  bool use_mptcp_pm = false ;     // use mptcpd path manager or not
+  int iperf_duration = 0;         // start iperf session time is sec 
   int iperfStart = 1 ;            // start generate traffic from time  
   mptcpdFd = -1 ;                 // file desc to connect to mptcpd plugin
   g_signalDbm = -85;              // init value rssi (dBm)
-  average_RSU_conn_time = 0.0;   // to calculate av connection time on RSU
+  average_RSU_conn_time = 0.0;    // to calculate av connection time on RSU
   
   /*****  MS-VAN3T configuration *****/
-
   std::string m_vId = "veh1";     // sumo id of our first vehicle
   bool send_cam = true;           // enable CAM service on vehicles and RSU
+  
   // double m_baseline_prr = 150.0;
   // bool m_prr_sup = false;
   //bool print_summary = false; // To print summary at the end of simulation
@@ -440,7 +442,7 @@ main (int argc, char *argv[])
                         startTcpdump); 
   cmd.AddValue ("verbose", "Print debug data every second", verbose);
   cmd.AddValue ("iperfRepeat", "Repeat iperf sessions umtil simulation end, the time of sessio is random value [10:100]sec", iperfReapeat); 
-  cmd.AddValue ("changeVehMaxSpeed", "The interval in ms to change periodicaly vehicles max speed randomly from [40:120]km/h don\'t change if 0", changeVehMaxSpeed); 
+  cmd.AddValue ("changeVehMaxSpeed", "The interval in [s] to change periodicaly vehicles max speed randomly from [40:120]km/h don\'t change if 0", changeVehMaxSpeed); 
   cmd.AddValue ("maxSpeed", "initial max veh speed [km/h]", maxVehSpeed); 
   cmd.AddValue ("sumo-folder","Position of sumo config files",sumo_folder);
   cmd.AddValue ("mob-trace", "Name of the mobility trace file", mob_trace);
@@ -570,8 +572,8 @@ main (int argc, char *argv[])
   NqosWaveMacHelper wifi80211pMac = NqosWaveMacHelper::Default ();
   Wifi80211pHelper wifi80211p = Wifi80211pHelper::Default ();
   wifi80211p.SetRemoteStationManager ("ns3::ConstantRateWifiManager", 
-                                        "DataMode", StringValue (phyMode), 
-                                        "ControlMode", StringValue (phyMode));
+                                      "DataMode", StringValue (phyMode), 
+                                      "ControlMode", StringValue (phyMode));
   
   // NetDeviceContainer dev_wifi_l_ap = 
   //               wifi80211p.Install (wifiPhy, wifi80211pMac, nodes_l_ap);
@@ -812,7 +814,7 @@ main (int argc, char *argv[])
   fdNet.SetAttribute ("EncapsulationMode", StringValue (encapMode));
 
   fdNet.SetDeviceName ("vethLeft");
-  devices = fdNet.Install (nodes.Get (0));
+  devices = fdNet.Install (nodes.Get (0)); 
   Ptr<NetDevice> leftFdDev = devices.Get (0);
   leftFdDev->SetAttribute (
                 "Address", Mac48AddressValue (Mac48Address::Allocate ()));
@@ -973,20 +975,24 @@ main (int argc, char *argv[])
 
       TypeId tid = TypeId::LookupByName ("ns3::UdpSocketFactory");
       Ptr<Socket> source = Socket::CreateSocket (nodeAP.Get (0), tid);
-      InetSocketAddress remote = InetSocketAddress (Ipv4Address ("255.255.255.255"), 80);
+      // broadcast beacons 
+      InetSocketAddress remote = 
+              InetSocketAddress (Ipv4Address ("255.255.255.255"), 80);
       source->SetAllowBroadcast (true);
       source->Connect (remote);
 
-      double interval = 100.0; // milliseconds send pack interval
-
-      Simulator::ScheduleWithContext (source->GetNode ()->GetId (), Seconds (1.0), &GenerateTraffic,
-                                      source, MilliSeconds (interval));
+      // milliseconds send pack interval 100 ms
+      Time inter_beacon_interval = MilliSeconds (100.0); 
+      Simulator::ScheduleWithContext (source->GetNode ()->GetId (), 
+                                      Seconds (1.0), &GenerateTraffic,
+                                      source, 
+                                      inter_beacon_interval);
   }
 
   // ********************************************************
   // Debug: Testing that proper IP addresses are configured
   // ********************************************************
-  wifiPhy.EnablePcap("mp-v2i",nodes);  
+  //wifiPhy.EnablePcap("mp-v2i",nodes);  
   //wifiPhy.EnablePcap("mp-v2i",nodeAP);  
   //wifiPhy.EnablePcap("mp-v2i",obuNodes);  
   //wifiPhy.EnablePcapAll ("mp-wifi", true);
@@ -995,7 +1001,7 @@ main (int argc, char *argv[])
 
   // realtime jitter calculation :
   // change interval
-  // Simulator::Schedule (MilliSeconds(100), &JitterMonitor, realSim);
+  Simulator::Schedule (MilliSeconds(100), &JitterMonitor, realSim);
   
 
   // ********************************************************
@@ -1010,10 +1016,12 @@ main (int argc, char *argv[])
   }
 
   // use MPTCPD PM to control subflows
-  // monitor 802.11p RF metrics for each received pack
-  // and sends commands to set BACKUP flag
-  Config::ConnectWithoutContext ("/NodeList/0/DeviceList/*/Phy/MonitorSnifferRx",
-                                 MakeCallback (&MonitorSniffRx));
+  // monitor 802.11p RF metrics for each received pack and sends commands 
+  // to set BACKUP flag
+  if (use_mptcp_pm){
+      Config::ConnectWithoutContext ("/NodeList/0/DeviceList/*/Phy/MonitorSnifferRx",
+                                     MakeCallback (&MonitorSniffRx));
+  }
 
   if (iperf_duration)
     {
@@ -1031,13 +1039,15 @@ main (int argc, char *argv[])
 
   // Print debug info 
   if (verbose){
-      Simulator::Schedule (
-          MilliSeconds (500), &PrintVehicleData, sumoClient, m_vId);
+      Simulator::Schedule ( MilliSeconds (500), 
+                            &PrintVehicleData, sumoClient, m_vId);
   }
 
+  // Update vehicle max speed to simulate different traffic patterns 
   if (changeVehMaxSpeed){
-    Simulator::Schedule (
-          Seconds (changeVehMaxSpeed), &ChangeVehicleSpeed, sumoClient, m_vId, changeVehMaxSpeed);
+    Simulator::Schedule ( Seconds (changeVehMaxSpeed), 
+                          &ChangeVehicleSpeed, sumoClient, m_vId, 
+                          changeVehMaxSpeed);
   }
 
   //Simulator::Schedule (Seconds(iperfStart+2), &set_endpoin_backup, SSPI_IFACE_LTE);
