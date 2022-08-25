@@ -41,10 +41,11 @@
 #include "ns3/packet-socket-helper.h"
 #include "ns3/vehicle-visualizer-module.h"
 #include "ns3/PRRSupervisor.h"
-#include <unistd.h>
+
+#include <unistd.h> 
 
 // interact with mptcpd-plugin 
-#include "/home/vad/mptcpd-0.8/include/mptcpd/mptcp_ns3.h"
+#include "/home/vad/mptcpd/include/mptcpd/mptcp_ns3.h"
 #include <fcntl.h>
 
 using namespace ns3;
@@ -52,8 +53,9 @@ using namespace ns3;
 //NS_LOG_COMPONENT_DEFINE ("MpFdExample");
 
 #define MAX_VEH_SPEED 120 // km/h
-#define MIN_VEH_SPEED 40  // Km/h
+#define MIN_VEH_SPEED 10  // Km/h
 #define MAX_JITTER    100 // ms
+
 // Global variables for use in callbacks.
 double g_signalDbm;
 double average_RSU_conn_time; 
@@ -217,14 +219,12 @@ getNumberVeh (std::string path)
 
 /**
  * @brief write to mptcpd-plugin path manager, requires sudo ? 
- * @param msg struct sspi_ns3_message to send to our mptcpd through FIFO
+ * @param msg struct sspi_message to send to our plugin through FIFO
  * @param mptcpdFd file descriptor to write data to mptcpd  
  */
 void
-mptcpdWrite (struct sspi_ns3_message msg)
-{ 
-    // prepare msg for exit listening thread
-       
+mptcpd_cmd_write (struct sspi_cmd_message msg)
+{    
     /*  
         open in write mode, non blocking (O_NDELAY)
         This will cause open() to return -1 
@@ -243,17 +243,20 @@ mptcpdWrite (struct sspi_ns3_message msg)
                   << ", mptcpd deamon not listening ? " << std::endl;  
     }
     else {
-      int num = write (mptcpdFd, &msg, sizeof (msg));
-      if (num < 0){
-          std::cout << "Error write to mptcpd pipe \n";
-          mptcpdFd = -1 ; 
-      }
+        // create command message end send it 
+        struct sspi_message c_msg = {.type = SSPI_MSG_TYPE_CMD}; 
+        std::memcpy(c_msg.data, &msg, sizeof(msg)); 
+        int num = write (mptcpdFd, &c_msg, sizeof (c_msg));
+        if (num < 0){
+            std::cout << "Error write to mptcpd pipe \n";
+            mptcpdFd = -1 ; 
+        }
     }
 }
 
 /**
  * @brief repeat iperf sessions until simulation ends, iperf session duration is 
- * randomized, between [10:100] seconds -- 5:50 MB file size
+ * randomized, between [10:100] seconds = (+-) 5:50 MB file size
  * 
  */
 
@@ -270,10 +273,10 @@ void IperfRepeat ()
   duration = (duration > time_left-5 )? time_left - 5 : duration; 
   if (duration < 0 ) return;  
   
-  struct sspi_ns3_message sspi_msg = {.type = SSPI_CMD_IPERF_START, 
-                                      .value = duration};
-  mptcpdWrite (sspi_msg); 
-  std::cout << "New iperf session duration: " << duration << std::endl; 
+//   struct sspi_ns3_message sspi_msg = {.type = SSPI_CMD_IPERF_START, 
+//                                       .value = duration};
+//   mptcpdWrite (sspi_msg); 
+//   std::cout << "New iperf session duration: " << duration << std::endl; 
   
   Simulator::Schedule (Seconds (duration + 1), &IperfRepeat);
 }
@@ -288,9 +291,9 @@ set_endpoin_backup (int id)
 {
   std::cout << Simulator::Now().GetSeconds() 
             << "Send Backup endpoint " << id << std ::endl;
-  struct sspi_ns3_message msg = {.type = SSPI_CMD_BACKUP_FLAG_ON,
-                                 .value = id}; 
-  mptcpdWrite (msg);
+  struct sspi_cmd_message msg = {.cmd = SSPI_CMD_BACKUP_ON,
+                                 .cmd_value = id}; 
+  mptcpd_cmd_write (msg);
   sspi_iface_backup[id] = true;
 }
 
@@ -302,9 +305,9 @@ void
 clear_endpoint_falgs (int id){
   std::cout << Simulator::Now ().GetSeconds () 
             << "Clear flags endpoint " << id << std ::endl;
-  struct sspi_ns3_message msg = {.type = SSPI_CMD_CLEAR_FLAGS, 
-                                .value = id}; 
-  mptcpdWrite (msg);
+  struct sspi_cmd_message msg = {.cmd = SSPI_CMD_BACKUP_OFF, 
+                                 .cmd_value = id}; 
+  mptcpd_cmd_write (msg);
   sspi_iface_backup[id] = false;
 }
 /**
@@ -472,7 +475,7 @@ main (int argc, char *argv[])
 
   cmd.Parse (argc, argv);
 
-  // check some input param errors
+  // @TODO check some input param errors, make this better and informative 
   if (simTime < iperfStart) iperfStart = 0 ;  
   if (simTime < iperf_duration) iperf_duration = 0 ;
 
@@ -726,18 +729,18 @@ main (int argc, char *argv[])
   sumoClient->SetAttribute ("SumoAdditionalCmdOptions", 
                         StringValue (sumo_additional_options));
 
-  
-  /***  Setup and start CA service on RSU  *****/ 
-  simpleCAMSenderHelper SimpleCAMSenderHelper;
-  SimpleCAMSenderHelper.SetAttribute ("RealTime", BooleanValue(true));
-  SimpleCAMSenderHelper.SetAttribute ("Client", (PointerValue) sumoClient);
-  SimpleCAMSenderHelper.SetAttribute("IsRSU", BooleanValue(true));
-  SimpleCAMSenderHelper.SetAttribute("Interface", IntegerValue(ifIdxRsu));
-  
+  /***  Setup and start CA service on RSU  *****/
   if (send_cam) {
-      ApplicationContainer simpleCamSenderApp = SimpleCAMSenderHelper.Install (nodeAP);
-      simpleCamSenderApp.Start (Seconds (0.0));
-      simpleCamSenderApp.Stop (Seconds (simTime - 0.1) - Simulator::Now ());
+    simpleCAMSenderHelper SimpleCAMSenderHelper;
+    SimpleCAMSenderHelper.SetAttribute ("RealTime", BooleanValue (true));
+    SimpleCAMSenderHelper.SetAttribute ("Client", (PointerValue) sumoClient);
+    SimpleCAMSenderHelper.SetAttribute("IsRSU", BooleanValue(true));
+    SimpleCAMSenderHelper.SetAttribute("Interface", IntegerValue(ifIdxRsu));
+      
+    ApplicationContainer simpleCamSenderApp = 
+                                        SimpleCAMSenderHelper.Install (nodeAP);
+    simpleCamSenderApp.Start (Seconds (0.0));
+    simpleCamSenderApp.Stop (Seconds (simTime - 0.1) - Simulator::Now ());
   }
 
   /* callback function for node creation, return newlly created Node  */
@@ -762,19 +765,18 @@ main (int argc, char *argv[])
       }
 
     /***  Setup and start CA service on Vehicles  *****/
-    simpleCAMSenderHelper SimpleCAMHelper;
-    SimpleCAMHelper.SetAttribute ("RealTime", BooleanValue (true));
-    SimpleCAMHelper.SetAttribute ("Client", (PointerValue) sumoClient);
-
-    if (nodeCounter == 0)
-      SimpleCAMHelper.SetAttribute ("Interface", IntegerValue (ifIdxVeh));
-
-    /* Install CAM service Application on vehicles  */
     if (send_cam)
       {
-        ApplicationContainer setupAppSimpleSender = SimpleCAMHelper.Install (includedNode);
+        simpleCAMSenderHelper SimpleCAMHelper;
+        SimpleCAMHelper.SetAttribute ("RealTime", BooleanValue (true));
+        SimpleCAMHelper.SetAttribute ("Client", (PointerValue) sumoClient);
+        if (nodeCounter == 0)
+          SimpleCAMHelper.SetAttribute ("Interface", IntegerValue (ifIdxVeh));
+        
+        ApplicationContainer setupAppSimpleSender = 
+                                        SimpleCAMHelper.Install (includedNode);
         setupAppSimpleSender.Start (Seconds (0.0));
-        setupAppSimpleSender.Stop (Seconds (simTime - 0.1) - Simulator::Now ());
+        setupAppSimpleSender.Stop (Seconds (simTime - 0.1) - Simulator::Now());
       }
 
     std::cout << "Created Vehicle ID : " << nodeCounter << ", Node ID : " << includedNode->GetId ()
@@ -786,11 +788,16 @@ main (int argc, char *argv[])
 
   /* callback function for node shutdown */
   std::function<void (Ptr<Node>)> shutdownWifiNode = [] (Ptr<Node> exNode) {
-    /* Stop all applications */
-    Ptr<areaSpeedAdvisorClient80211p> areaSpeedAdvisorClient80211p_ =
-        exNode->GetApplication (0)->GetObject<areaSpeedAdvisorClient80211p> ();
-    if (areaSpeedAdvisorClient80211p_)
-      areaSpeedAdvisorClient80211p_->StopApplicationNow ();
+    
+    /* Stop all applications right now : 1ms sheduler */
+    for (uint32_t app =0 ; app < exNode->GetNApplications(); app ++){
+        exNode->GetApplication(app)->SetStopTime(MilliSeconds(1)); 
+    } 
+
+    // Ptr<areaSpeedAdvisorClient80211p> areaSpeedAdvisorClient80211p_ =
+    //     exNode->GetApplication (0)->GetObject<areaSpeedAdvisorClient80211p> ();
+    // if (areaSpeedAdvisorClient80211p_)
+    //   areaSpeedAdvisorClient80211p_->StopApplicationNow ();
 
     /* Set position outside communication range */
     Ptr<ConstantPositionMobilityModel> mob = 
@@ -1010,9 +1017,9 @@ main (int argc, char *argv[])
   
   // Start TcpDump recording 
   if (startTcpdump){
-      struct sspi_ns3_message sspi_msg = {.type = SSPI_CMD_TCPDUMP, 
-                                          .value = (int) simTime - 1};
-      Simulator::Schedule (MilliSeconds (500), &mptcpdWrite, sspi_msg);
+      struct sspi_cmd_message sspi_msg = {.cmd = SSPI_CMD_TCPDUMP, 
+                                          .cmd_value = (int) simTime - 1};
+      Simulator::Schedule (MilliSeconds (500), &mptcpd_cmd_write, sspi_msg);
   }
 
   // use MPTCPD PM to control subflows
@@ -1027,9 +1034,9 @@ main (int argc, char *argv[])
     {
       // start iperf MPTCP session after [iperfStart] of simulation
       // session duration is defined in iperf_duration variable
-      struct sspi_ns3_message sspi_msg = {.type = SSPI_CMD_IPERF_START, 
-                                          .value = iperf_duration};
-      Simulator::Schedule (Seconds(iperfStart), &mptcpdWrite, sspi_msg);
+      struct sspi_cmd_message sspi_msg = {.cmd = SSPI_CMD_IPERF_START, 
+                                          .cmd_value = iperf_duration};
+      Simulator::Schedule (Seconds(iperfStart), &mptcpd_cmd_write, sspi_msg);
     }
   
   // generate truffic until simulation ends, continue to establish iperf sessions 
@@ -1039,7 +1046,7 @@ main (int argc, char *argv[])
 
   // Print debug info 
   if (verbose){
-      Simulator::Schedule ( MilliSeconds (500), 
+      Simulator::Schedule ( MilliSeconds (1000), 
                             &PrintVehicleData, sumoClient, m_vId);
   }
 

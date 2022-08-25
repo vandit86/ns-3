@@ -89,7 +89,9 @@ ip netns exec right ip mptcp endpoint add 13.0.0.2 dev eth0 id 1 signal
 ip netns exec right ip mptcp endpoint add 14.0.0.2 dev eth1 id 2 signal
 
 
-# Just define endpoint for client (UE)
+# Just define endpoint for client (UE) and enadle userspace PM 
+sysctl -w  net.mptcp.pm_type=1
+echo 1 > /proc/sys/net/mptcp/pm_type
 ip netns exec left ip mptcp endpoint add 11.0.0.2 dev eth0 id 1  
 ip netns exec left ip mptcp endpoint add 15.0.0.2 dev eth1 id 2  
     
