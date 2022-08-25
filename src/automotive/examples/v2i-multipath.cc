@@ -42,6 +42,7 @@
 #include "ns3/vehicle-visualizer-module.h"
 #include "ns3/PRRSupervisor.h"
 
+#include <sstream>      // std::stringstream
 #include <unistd.h> 
 
 // interact with mptcpd-plugin 
@@ -65,12 +66,6 @@ double simTime = 60;          // sim time, 1 min by default
 //uint32_t g_samples;
 
 /** NS-3 connection glob vars **/
-
-/* we need to save information about iface connection state (in backup or not)
-    index of array represents endpoint num (support only 2 endpoints) 
-    size = num ifaces + 1 
-*/
-bool sspi_iface_backup[3] = {false};
         
 int mptcpdFd;      // file descriptor to interact with mptcpd             
 
@@ -132,11 +127,11 @@ JitterMonitor (Ptr<RealtimeSimulatorImpl> rt)
  */
 
 static void 
-GenerateTraffic (Ptr<Socket> socket, Time pktInterval )
+GenerateUdpBeacons (Ptr<Socket> socket, Time pktInterval )
 {
   uint32_t pktSize = 10; // bytes  (+64 bytes)   
   socket->Send (Create<Packet> (pktSize));
-  Simulator::Schedule (pktInterval, &GenerateTraffic, socket, pktInterval);
+  Simulator::Schedule (pktInterval, &GenerateUdpBeacons, socket, pktInterval);
 }
 
 /**
@@ -217,99 +212,119 @@ getNumberVeh (std::string path)
   return numberOfNodes;
 }
 
-/**
- * @brief write to mptcpd-plugin path manager, requires sudo ? 
- * @param msg struct sspi_message to send to our plugin through FIFO
- * @param mptcpdFd file descriptor to write data to mptcpd  
- */
-void
-mptcpd_cmd_write (struct sspi_cmd_message msg)
-{    
-    /*  
-        open in write mode, non blocking (O_NDELAY)
-        This will cause open() to return -1 
-        if there are no processes that have the file open for reading.
-        Note: we should run ns3 with sudo , since netns run under root
-        and permitions of pipe
-    */
-    if (mptcpdFd < 0 ){
-        std::cout << "NEW connection to mptcpd" << std::endl; 
-        mptcpdFd = open (SSPI_FIFO_PATH, O_WRONLY, O_NDELAY);
-    } 
-    
-    // no thread are listing : try again later, or exit ?? 
-    if (mptcpdFd < 0){
-        std::cout << "unable to open pipe: " << SSPI_FIFO_PATH  
-                  << ", mptcpd deamon not listening ? " << std::endl;  
-    }
-    else {
-        // create command message end send it 
-        struct sspi_message c_msg = {.type = SSPI_MSG_TYPE_CMD}; 
-        std::memcpy(c_msg.data, &msg, sizeof(msg)); 
-        int num = write (mptcpdFd, &c_msg, sizeof (c_msg));
-        if (num < 0){
-            std::cout << "Error write to mptcpd pipe \n";
-            mptcpdFd = -1 ; 
-        }
-    }
-}
 
 /**
- * @brief repeat iperf sessions until simulation ends, iperf session duration is 
- * randomized, between [10:100] seconds = (+-) 5:50 MB file size
- * 
- */
-
-void IperfRepeat ()
-{
-  // session duration is defined in iperf_duration variable
-  Ptr<UniformRandomVariable> x = CreateObject<UniformRandomVariable> ();
-  x->SetAttribute ("Min", DoubleValue (10));
-  x->SetAttribute ("Max", DoubleValue (100));
-
-  // set session duration, be cearful with simTime 
-  int duration = (int) x->GetInteger();
-  int time_left = (int) (simTime - Simulator::Now().GetSeconds());
-  duration = (duration > time_left-5 )? time_left - 5 : duration; 
-  if (duration < 0 ) return;  
-  
-//   struct sspi_ns3_message sspi_msg = {.type = SSPI_CMD_IPERF_START, 
-//                                       .value = duration};
-//   mptcpdWrite (sspi_msg); 
-//   std::cout << "New iperf session duration: " << duration << std::endl; 
-  
-  Simulator::Schedule (Seconds (duration + 1), &IperfRepeat);
-}
-
-
-/**
- * @brief Set the endpoin to backup flag 
- * @param id ID of the endpoint  
- */
-void
-set_endpoin_backup (int id)
-{
-  std::cout << Simulator::Now().GetSeconds() 
-            << "Send Backup endpoint " << id << std ::endl;
-  struct sspi_cmd_message msg = {.cmd = SSPI_CMD_BACKUP_ON,
-                                 .cmd_value = id}; 
-  mptcpd_cmd_write (msg);
-  sspi_iface_backup[id] = true;
-}
-
-/**
- * @brief Clear all flags for endpoint 
- * @param id ID of the endpoint 
+ * @brief open in write mode, non blocking (O_NDELAY) This will cause open() 
+ * to return -1 if there are no processes that have the file open for reading.
+ * close silulation if no process are listening.. 
+ * Note: we should run ns3 with sudo , since netns run under root and permitions
+ * of pipe
  */
 void 
-clear_endpoint_falgs (int id){
-  std::cout << Simulator::Now ().GetSeconds () 
-            << "Clear flags endpoint " << id << std ::endl;
-  struct sspi_cmd_message msg = {.cmd = SSPI_CMD_BACKUP_OFF, 
-                                 .cmd_value = id}; 
-  mptcpd_cmd_write (msg);
-  sspi_iface_backup[id] = false;
+mptcpd_open_pipe (){
+    
+    // close fd if exists one 
+    if (mptcpdFd > 0) {
+        close (mptcpdFd);
+        mptcpdFd = -1;  
+    }
+
+    // open new fd  
+    if (mptcpdFd < 0 ){
+        std::cout << "NEW pipe connection:" << SSPI_FIFO_PATH << std::endl; 
+        if ((mptcpdFd = open (SSPI_FIFO_PATH, O_WRONLY, O_NDELAY)) < 0 ){
+            NS_FATAL_ERROR ("Error: unable to open pipe: " << SSPI_FIFO_PATH);
+        } 
+    } 
 }
+
+/**
+ * @brief send command to userspace mptcp path manager  
+ * @param msg @c struct sspi_cmd_message to send to our plugin through FIFO
+ */
+void
+mptcpd_cmd_write (struct sspi_cmd_message const *msg)
+{
+    // connect to pipe if first time called
+    if (mptcpdFd < 0)
+        mptcpd_open_pipe ();
+    
+    std::cout << "cmd: " << (int)msg->cmd << " val: " << msg->cmd_value << std::endl; 
+    
+    // create command message end send it
+    struct sspi_message c_msg = {.type = SSPI_MSG_TYPE_CMD};
+    std::memcpy (c_msg.data, msg, sizeof (sspi_cmd_message));    
+    
+    if (write (mptcpdFd, &c_msg, sizeof (c_msg)) < 0) {
+            std::cout << "Can't write command to pipe \n";
+            mptcpdFd = -1; // try to reconect on next time
+    }
+}
+
+/**
+ * @brief send data message to userspace mptcp path manager 
+ * @param msg @c struct sspi_data_message to send 
+ */
+
+void 
+mptcpd_data_write (struct sspi_data_message const *msg){
+    
+    // connect to pipe if first time called
+    if (mptcpdFd < 0)
+        mptcpd_open_pipe ();
+
+    // create message end send it
+    struct sspi_message d_msg = {.type = SSPI_MSG_TYPE_DATA};
+    std::memcpy (d_msg.data, msg, sizeof (sspi_data_message));
+    
+    if (write (mptcpdFd, &d_msg, sizeof (d_msg)) < 0) {
+        std::cout << "Can't write data to pipe \n";
+        mptcpdFd = -1; // try to reconect on next time
+    }
+}
+
+/**
+ * @brief send cmd to start tcpdump on all inetrfaces 
+ * @param time duration when send SIGKILL for tcpdump process
+ */
+void RunTcpdump ( int time){
+     struct sspi_cmd_message msg = {.cmd = SSPI_CMD_TCPDUMP, 
+                                            .cmd_value = time};
+    mptcpd_cmd_write (&msg);                                             
+}
+
+/**
+ * @brief send command to plugin to generate traffic with iperf 
+ * @param duration time to run (-t)
+ * @param repeat  continue to generate traffic with iperf until simulation ends,
+ * iperf session duration is randomized, between [10:100] seconds = 
+ * (+-) 5:50 MB file size
+ */
+void RunIperf ( int duration, bool repeat)
+{
+    // set session duration, be cearful to not exceed total simTime
+    double _now = Simulator::Now().GetSeconds(); 
+    if (duration + _now + 1 >= simTime){
+        duration = simTime - _now - 1; 
+    } 
+    if (duration < 0) return;
+
+    struct sspi_cmd_message sspi_msg = {.cmd = SSPI_CMD_IPERF_START, 
+                                        .cmd_value = (int) duration};
+    mptcpd_cmd_write (&sspi_msg);
+    std::cout << "New iperf session, duration: " << duration << " sec" << std::endl;
+
+    if (repeat){
+        // set random next session duration
+        Ptr<UniformRandomVariable> x = CreateObject<UniformRandomVariable> ();
+        x->SetAttribute ("Min", DoubleValue (10));
+        x->SetAttribute ("Max", DoubleValue (100));
+        Simulator::Schedule (Seconds (duration + 1), &RunIperf, 
+                                            (int) x->GetInteger(), repeat);
+        } 
+}
+
+
 /**
    * \brief TracedCallback signature for monitor mode receive events.
    *
@@ -336,52 +351,39 @@ MonitorSniffRx (Ptr<const Packet> packet, uint16_t channelFreqMhz, WifiTxVector 
                 MpduInfo aMpdu, SignalNoiseDbm signalNoise, uint16_t staId)
 
 {
-  //   g_samples++;
-  //   g_signalDbmAvg += ((signalNoise.signal - g_signalDbmAvg) / g_samples);
-  //   g_noiseDbmAvg += ((signalNoise.noise - g_noiseDbmAvg) / g_samples);
+    //   g_samples++;
+    //   g_signalDbmAvg += ((signalNoise.signal - g_signalDbmAvg) / g_samples);
+    //   g_noiseDbmAvg += ((signalNoise.noise - g_noiseDbmAvg) / g_samples);
 
-  // //   staId == 65535
-  // //   channelFreqMhz ==  5860
+    // //   staId == 65535
+    // //   channelFreqMhz ==  5860
+    //   std::cout << Simulator::Now().GetSeconds()  <<"\t" << signalNoise.signal
+    //                                               <<"\t" << signalNoise.noise
+    //                                               << std::endl ;
+    // 34.5908	-81.7451	-96.9763
+    // send backup flag (initially sspi:backup = false)
 
-  //   std::cout << Simulator::Now().GetSeconds()  <<"\t" << signalNoise.signal
-  //                                               <<"\t" << signalNoise.noise
-  //                                               << std::endl ;
-  
-  // 34.5908	-81.7451	-96.9763
-  // send backup flag (initially sspi:backup = false)
+    // Beacon size == 74 
+    // std::cout << " Packet size : " << packet->GetSize() << std::endl; 
+    // SIMPLE LPF  α * x[i] + (1-α) * y[i-1]
+    //  double RSSI_T = -80; // RSSI Threashold value
+    
+    double alpha = 0.85; // alpha value 
+    g_signalDbm = alpha * signalNoise.signal + (1-alpha)*g_signalDbm; 
+    
+    // prepare data msg to send 
+    struct sspi_data_message msg_data = {.rss = signalNoise.signal, 
+                                            .noise = signalNoise.noise }; 
 
-  // Beacon size == 74 
-  // std::cout << " Packet size : " << packet->GetSize() << std::endl; 
-  // SIMPLE LPF  α * x[i] + (1-α) * y[i-1]
-  double RSSI_T = -80; // RSSI Threashold value
-  double alpha = 0.85; // alpha value 
-  g_signalDbm = alpha * signalNoise.signal + (1-alpha)*g_signalDbm; 
-  
-  //if (!use_mptcp_pm) return ; // just monitor and return if not enabled 
+    NS_UNUSED(msg_data); 
+    //mptcpd_data_write (&msg_data); 
 
-  //CHACKING SIGNAL RSSI VALUE 
-  if (g_signalDbm < (RSSI_T) && !sspi_iface_backup[SSPI_IFACE_WLAN]) {
-      // check if lte is in backup mode, if so clean flags on LTE iface
-      if (sspi_iface_backup[SSPI_IFACE_LTE])
-        {
-          clear_endpoint_falgs (SSPI_IFACE_LTE);
-          return;
-        }
-      // now we can set WLAN to backup 
-      set_endpoin_backup (SSPI_IFACE_WLAN);
-  }
-  // RSSI is Higher than threashold -> turn on WLAN 
-  else if (g_signalDbm > (RSSI_T) && sspi_iface_backup[SSPI_IFACE_WLAN])
-    {
-      clear_endpoint_falgs (SSPI_IFACE_WLAN);
-    }
-  //   Ipv4Header ipv4H ;
-
-  //   WifiMacHeader wifiH;
-  //   if (uint32_t num = packet->PeekHeader(wifiH)){
-  //     std::cout<< "num : "<<num << "\ta1:"<<  wifiH.GetAddr1()
-  //                 << "\ta2:"<<  wifiH.GetAddr2() << std::endl;
-  //   }
+    //   Ipv4Header ipv4H ;
+    //   WifiMacHeader wifiH;
+    //   if (uint32_t num = packet->PeekHeader(wifiH)){
+    //     std::cout<< "num : "<<num << "\ta1:"<<  wifiH.GetAddr1()
+    //                 << "\ta2:"<<  wifiH.GetAddr2() << std::endl;
+    //   }
 }
 
 // ***************************************************************************
@@ -463,12 +465,12 @@ main (int argc, char *argv[])
   //  vehicle_vis);
 
   //   cmd.AddValue ("csv-log-cumulative",
-  //                     "Name of the CSV log file for the cumulative (average) \
+  //                     "Name of the CSV log file for the cumulative (average) 
   //                     PRR and latency data",
   //                     csv_name_cumulative);
 
   // cmd.AddValue ("netstate-dump-file",
-  //     "Name of the SUMO netstate-dump file containing the vehicle-related \
+  //     "Name of the SUMO netstate-dump file containing the vehicle-related 
   //      information throughout the whole simulation", sumo_netstate_file_name);
   // cmd.AddValue ("baseline", "Baseline for PRR calculation", m_baseline_prr);
   // cmd.AddValue ("prr-sup", "Use the PRR supervisor or not", m_prr_sup);
@@ -991,7 +993,7 @@ main (int argc, char *argv[])
       // milliseconds send pack interval 100 ms
       Time inter_beacon_interval = MilliSeconds (100.0); 
       Simulator::ScheduleWithContext (source->GetNode ()->GetId (), 
-                                      Seconds (1.0), &GenerateTraffic,
+                                      Seconds (1.0), &GenerateUdpBeacons,
                                       source, 
                                       inter_beacon_interval);
   }
@@ -1015,11 +1017,9 @@ main (int argc, char *argv[])
   // MPTCPD: Interaction with MPTCPD Path manager
   // ********************************************************
   
-  // Start TcpDump recording 
+  // collect pcap data durring the simulation with TcpDump  
   if (startTcpdump){
-      struct sspi_cmd_message sspi_msg = {.cmd = SSPI_CMD_TCPDUMP, 
-                                          .cmd_value = (int) simTime - 1};
-      Simulator::Schedule (MilliSeconds (500), &mptcpd_cmd_write, sspi_msg);
+      Simulator::Schedule (MilliSeconds (500), &RunTcpdump, simTime-1);
   }
 
   // use MPTCPD PM to control subflows
@@ -1030,19 +1030,15 @@ main (int argc, char *argv[])
                                      MakeCallback (&MonitorSniffRx));
   }
 
-  if (iperf_duration)
-    {
-      // start iperf MPTCP session after [iperfStart] of simulation
-      // session duration is defined in iperf_duration variable
-      struct sspi_cmd_message sspi_msg = {.cmd = SSPI_CMD_IPERF_START, 
-                                          .cmd_value = iperf_duration};
-      Simulator::Schedule (Seconds(iperfStart), &mptcpd_cmd_write, sspi_msg);
+    /**
+    * generate traffic with iperf  
+    */
+  if (iperf_duration){
+        Simulator::Schedule (Seconds(iperfStart), &RunIperf, 
+                                            iperf_duration, iperfReapeat);
     }
   
-  // generate truffic until simulation ends, continue to establish iperf sessions 
-  if (iperfReapeat){
-      Simulator::Schedule (Seconds (iperfStart+iperf_duration+1), &IperfRepeat);
-  }
+
 
   // Print debug info 
   if (verbose){
@@ -1059,39 +1055,40 @@ main (int argc, char *argv[])
 
   //Simulator::Schedule (Seconds(iperfStart+2), &set_endpoin_backup, SSPI_IFACE_LTE);
    
-  // Show parameters : 
-   std::cout <<  "SimTime: " << simTime << "\n" 
-                << "TcpDump: " << startTcpdump << "\n" 
-                << "IperfTime: " << iperf_duration << "\n" 
-                << "IperfStart: " << iperfStart << "\n" 
-                << "SendCam: " << send_cam << "\n" 
-                << "Verbose: "  << verbose << "\n"
-                << "Initial max Veh speed " << maxVehSpeed << "\n"
-                << "Change Veh Speed " << changeVehMaxSpeed << "\n" 
-                << "Repeat iperf " << iperfReapeat << "\n" 
-                << std::endl; 
+  // Show parameters :
+   std::stringstream conf_param; 
+   conf_param   << "SimTime: "          << simTime << "\n" 
+                << "TcpDump: "          << startTcpdump << "\n" 
+                << "IperfTime: "        << iperf_duration << "\n" 
+                << "IperfStart: "       << iperfStart << "\n" 
+                << "Verbose: "          << verbose << "\n"
+                << "Max Speed: "        << maxVehSpeed << "\n"
+                << "Change Speed: "     << changeVehMaxSpeed << "\n" 
+                << "Repeat iperf: "     << iperfReapeat << "\n"
+                << "Enable CAM: "       << send_cam << "\n";  
+    
+    if (!send_cam) conf_param << "\t CA service Disabled: UDP traffic will be generated";
 
-  /*
-    config output , write config params to file
-  */
-  Config::SetDefault ("ns3::ConfigStore::Filename", 
-                                      StringValue ("output-attributes.txt"));
-  Config::SetDefault ("ns3::ConfigStore::FileFormat", 
-                                      StringValue ("RawText"));
-  Config::SetDefault ("ns3::ConfigStore::Mode", 
-                                      StringValue ("Save"));
-  ConfigStore outputConfig;
-  outputConfig.ConfigureDefaults ();
-  outputConfig.ConfigureAttributes ();
+    // show configuration params; 
+    std::cout << conf_param.str() << std::endl;
 
-  /*** 10. Setup and Start Simulation + Animation ***/
-  // AnimationInterface anim ("ns3-sumo-coupling.xml"); // Mandatory
-  //
-  // Now, do the actual emulation.
-  //
-  NS_LOG_INFO ("Run Emulation.");
-  Simulator::Stop (Seconds (simTime));
-  Simulator::Run ();
-  Simulator::Destroy ();
-  NS_LOG_INFO ("Done.");
+    /*
+        config output , write ns-3 config params to file
+    */
+    Config::SetDefault ("ns3::ConfigStore::Filename", StringValue ("output-attributes.txt"));
+    Config::SetDefault ("ns3::ConfigStore::FileFormat", StringValue ("RawText"));
+    Config::SetDefault ("ns3::ConfigStore::Mode", StringValue ("Save"));
+    ConfigStore outputConfig;
+    outputConfig.ConfigureDefaults ();
+    outputConfig.ConfigureAttributes ();
+
+    /*** 10. Setup and Start Simulation + Animation ***/
+    // AnimationInterface anim ("ns3-sumo-coupling.xml"); // Mandatory
+    // Now, do the actual emulation.
+    //
+    NS_LOG_INFO ("Run Emulation.");
+    Simulator::Stop (Seconds (simTime));
+    Simulator::Run ();
+    Simulator::Destroy ();
+    NS_LOG_INFO ("Done.");
 }
