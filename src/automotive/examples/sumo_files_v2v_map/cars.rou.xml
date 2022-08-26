@@ -21,8 +21,8 @@
 
       <vehicle id="veh1" type="Car2" depart="0.305337402498" route="0">
     </vehicle>
-    
    <!-- JITTER LINIT IS 22 veh (node id 28 in ns-3)
+    
     <vehicle id="veh2" type="Car0" depart="0.600133874271" route="0">
     </vehicle>
     <vehicle id="veh3" type="Car2" depart="1.04994493787" route="1">
@@ -40,8 +40,8 @@
       <vehicle id="veh9" type="Car2" depart="1.6802238939" route="3">
     </vehicle>
       <vehicle id="veh10" type="Car2" depart="1.78089324934" route="3">
-    
     </vehicle>
+   
       <vehicle id="veh11" type="Car4" depart="2.02374230514" route="4">
     </vehicle>
       <vehicle id="veh12" type="Car2" depart="2.18039033045" route="3">

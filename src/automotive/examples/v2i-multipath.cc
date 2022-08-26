@@ -351,39 +351,31 @@ MonitorSniffRx (Ptr<const Packet> packet, uint16_t channelFreqMhz, WifiTxVector 
                 MpduInfo aMpdu, SignalNoiseDbm signalNoise, uint16_t staId)
 
 {
+    //std::cout << "addr" << hdr.GetAddr1() << std::endl;    // broadcast 
+    // channelFreqMhz ==  5860
+    WifiMacHeader hdr;
+    packet->PeekHeader (hdr);
+
+    Mac48Address rsu_mac ("00:00:00:00:00:02"); 
+    if (rsu_mac == hdr.GetAddr2()){
+
+        // prepare data msg to send
+        struct sspi_data_message msg_data = {.rss = signalNoise.signal, 
+                                            .noise = signalNoise.noise};
+
+        //NS_UNUSED (msg_data);
+        mptcpd_data_write (&msg_data);
+    }
+
     //   g_samples++;
     //   g_signalDbmAvg += ((signalNoise.signal - g_signalDbmAvg) / g_samples);
     //   g_noiseDbmAvg += ((signalNoise.noise - g_noiseDbmAvg) / g_samples);
 
-    // //   staId == 65535
-    // //   channelFreqMhz ==  5860
-    //   std::cout << Simulator::Now().GetSeconds()  <<"\t" << signalNoise.signal
-    //                                               <<"\t" << signalNoise.noise
-    //                                               << std::endl ;
-    // 34.5908	-81.7451	-96.9763
-    // send backup flag (initially sspi:backup = false)
-
+    //   std::cout << Simulator::Now().GetSeconds()  
     // Beacon size == 74 
     // std::cout << " Packet size : " << packet->GetSize() << std::endl; 
-    // SIMPLE LPF  α * x[i] + (1-α) * y[i-1]
     //  double RSSI_T = -80; // RSSI Threashold value
-    
-    double alpha = 0.85; // alpha value 
-    g_signalDbm = alpha * signalNoise.signal + (1-alpha)*g_signalDbm; 
-    
-    // prepare data msg to send 
-    struct sspi_data_message msg_data = {.rss = signalNoise.signal, 
-                                            .noise = signalNoise.noise }; 
-
-    NS_UNUSED(msg_data); 
-    //mptcpd_data_write (&msg_data); 
-
-    //   Ipv4Header ipv4H ;
-    //   WifiMacHeader wifiH;
-    //   if (uint32_t num = packet->PeekHeader(wifiH)){
-    //     std::cout<< "num : "<<num << "\ta1:"<<  wifiH.GetAddr1()
-    //                 << "\ta2:"<<  wifiH.GetAddr2() << std::endl;
-    //   }
+   
 }
 
 // ***************************************************************************
@@ -419,6 +411,7 @@ main (int argc, char *argv[])
   /*****  MS-VAN3T configuration *****/
   std::string m_vId = "veh1";     // sumo id of our first vehicle
   bool send_cam = true;           // enable CAM service on vehicles and RSU
+  uint32_t rsu_cam_interval_ms = 200; // cam generation interval by RSU (ms)
   
   // double m_baseline_prr = 150.0;
   // bool m_prr_sup = false;
@@ -738,6 +731,9 @@ main (int argc, char *argv[])
     SimpleCAMSenderHelper.SetAttribute ("Client", (PointerValue) sumoClient);
     SimpleCAMSenderHelper.SetAttribute("IsRSU", BooleanValue(true));
     SimpleCAMSenderHelper.SetAttribute("Interface", IntegerValue(ifIdxRsu));
+    SimpleCAMSenderHelper.SetAttribute("RSU_CAM_Interval", 
+                                            IntegerValue(rsu_cam_interval_ms));
+
       
     ApplicationContainer simpleCamSenderApp = 
                                         SimpleCAMSenderHelper.Install (nodeAP);

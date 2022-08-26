@@ -48,10 +48,11 @@ private:
 
   Ptr<TraciClient> m_client; //!< TraCI SUMO client
 
-  std::string m_id; //!< vehicle id
-  bool m_real_time; //!< To decide wheter to use realtime scheduler
-  bool m_is_rsu = false;    // is this node is stationary RSU 
-  uint32_t m_iface = 0; // interface used when send CAM (default 0)
+  std::string m_id;                 //!< vehicle id
+  bool m_real_time;                 //!< To decide wheter to use realtime scheduler
+  bool m_is_rsu = false;            // is this node is stationary RSU 
+  uint32_t m_iface = 0;             // interface used when send CAM (default 0)
+  uint32_t m_rsu_cam_interval_ms;       // rsu cam generation interval in ms
 
   EventId m_sendCamEvent; //!< Event to send the CAM
 

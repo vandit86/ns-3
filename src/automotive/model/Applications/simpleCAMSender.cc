@@ -54,6 +54,11 @@ namespace ns3
             BooleanValue(false),
             MakeBooleanAccessor (&simpleCAMSender::m_is_rsu),
             MakeBooleanChecker ())
+        .AddAttribute ("RSU_CAM_Interval",
+            "CAM gereration interval by RSU in ms",
+            IntegerValue(100),
+            MakeIntegerAccessor (&simpleCAMSender::m_rsu_cam_interval_ms),
+            MakeIntegerChecker<uint32_t>())
         .AddAttribute ("Interface",
             "number of interface to use",
             IntegerValue(0),
@@ -156,7 +161,7 @@ namespace ns3
         m_caService.setFixedPositionRSU (rsuPos.y, rsuPos.x);
         
         // interval of cam generation (ms)
-        m_caService.changeRSUGenInterval(100); 
+        m_caService.changeRSUGenInterval(m_rsu_cam_interval_ms); 
     }
     else {
         m_caService.setStationProperties (1000 + std::stol (m_id.substr (3)),
@@ -191,7 +196,6 @@ namespace ns3
     std::cout << "Vehicle " << m_id
               << " has sent " << cam_sent
               << " CAMs" << std::endl;
-       
   }
 
   void
@@ -204,6 +208,11 @@ namespace ns3
   void
   simpleCAMSender::receiveCAM (asn1cpp::Seq<CAM> cam, Address from)
   {
+    // alterbnative for rssi measurments : run callback when cam from RSU received 
+
+    // // 4789:0:1:102:600::200
+    //  Ipv6Address r_addr = Inet6SocketAddress::ConvertFrom(from).GetIpv6 (); 
+    //  std::cout << "receiveCam, ipv6 : " << r_addr << std::endl;  
 
     // // print only cam my veh receive
     // if (m_id == "veh1" && cam->header.stationID != 1001)
