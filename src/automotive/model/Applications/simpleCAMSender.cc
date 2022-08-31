@@ -36,35 +36,35 @@ namespace ns3
   {
     static TypeId tid =
         TypeId ("ns3::simpleCAMSender")
-        .SetParent<Application> ()
-        .SetGroupName ("Applications")
-        .AddConstructor<simpleCAMSender> ()
-        .AddAttribute ("RealTime",
-            "To compute properly timestamps",
-            BooleanValue(false),
-            MakeBooleanAccessor (&simpleCAMSender::m_real_time),
-            MakeBooleanChecker ())
-        .AddAttribute ("Client",
-            "TraCI client for SUMO",
-            PointerValue (0),
-            MakePointerAccessor (&simpleCAMSender::m_client),
-            MakePointerChecker<TraciClient> ())
-        .AddAttribute ("IsRSU",
-            "Is this node stationary RSU",
-            BooleanValue(false),
-            MakeBooleanAccessor (&simpleCAMSender::m_is_rsu),
-            MakeBooleanChecker ())
-        .AddAttribute ("RSU_CAM_Interval",
-            "CAM gereration interval by RSU in ms",
-            IntegerValue(100),
-            MakeIntegerAccessor (&simpleCAMSender::m_rsu_cam_interval_ms),
-            MakeIntegerChecker<uint32_t>())
-        .AddAttribute ("Interface",
-            "number of interface to use",
-            IntegerValue(0),
-            MakeIntegerAccessor (&simpleCAMSender::m_iface),
-            MakeIntegerChecker<uint32_t>());
-        return tid;
+            .SetParent<Application> ()
+            .SetGroupName ("Applications")
+            .AddConstructor<simpleCAMSender> ()
+            .AddAttribute ("RealTime", "To compute properly timestamps", BooleanValue (false),
+                           MakeBooleanAccessor (&simpleCAMSender::m_real_time),
+                           MakeBooleanChecker ())
+            .AddAttribute ("Client", "TraCI client for SUMO", PointerValue (0),
+                           MakePointerAccessor (&simpleCAMSender::m_client),
+                           MakePointerChecker<TraciClient> ())
+            .AddAttribute ("IsRSU", "Is this node stationary RSU", BooleanValue (false),
+                           MakeBooleanAccessor (&simpleCAMSender::m_is_rsu), MakeBooleanChecker ())
+            .AddAttribute ("RSU_CAM_Interval", "CAM gereration interval by RSU in ms",
+                           IntegerValue (100),
+                           MakeIntegerAccessor (&simpleCAMSender::m_rsu_cam_interval_ms),
+                           MakeIntegerChecker<uint32_t> ())
+            .AddAttribute ("Interface", "number of interface to use", IntegerValue (0),
+                           MakeIntegerAccessor (&simpleCAMSender::m_iface),
+                           MakeIntegerChecker<uint32_t> ())
+            // .AddAttribute ("CAMCallback",
+            //                "Callback invoked whenever an CAM is received on this CA application.",
+            //                CallbackValue (), 
+            //                MakeCallbackAccessor (&simpleCAMSender::m_cam_callback),
+            //                MakeCallbackChecker ())
+            
+            ;
+
+                           
+                           
+    return tid;
   }
 
   simpleCAMSender::simpleCAMSender ()
@@ -198,6 +198,7 @@ namespace ns3
               << " CAMs" << std::endl;
   }
 
+
   void
   simpleCAMSender::StopApplicationNow ()
   {
@@ -208,11 +209,29 @@ namespace ns3
   void
   simpleCAMSender::receiveCAM (asn1cpp::Seq<CAM> cam, Address from)
   {
+    (void) cam;
+    (void) from; 
     // alterbnative for rssi measurments : run callback when cam from RSU received 
 
-    // // 4789:0:1:102:600::200
+    //  4789:0:1:102:600::200
     //  Ipv6Address r_addr = Inet6SocketAddress::ConvertFrom(from).GetIpv6 (); 
     //  std::cout << "receiveCam, ipv6 : " << r_addr << std::endl;  
+    // StationType_t s_type = cam->cam.camParameters.basicContainer.stationType; 
+    // //StationID_t s_id = cam->header.stationID;
+
+    // // if our vehicle receive cam from some RSU : invoce callback 
+    // if (m_id == "veh1" && s_type == StationType_roadSideUnit) {
+
+    //     long s_id = asn1cpp::getField(cam->header.stationID, long); 
+        
+    //     double lat = asn1cpp::getField 
+    //         (cam->cam.camParameters.basicContainer.referencePosition.latitude, double); 
+        
+    //     double lon = asn1cpp::getField 
+    //         (cam->cam.camParameters.basicContainer.referencePosition.longitude, double); 
+        
+    //     m_cam_callback (s_id, lat, lon); 
+        //cam->cam.camParameters.basicContainer
 
     // // print only cam my veh receive
     // if (m_id == "veh1" && cam->header.stationID != 1001)

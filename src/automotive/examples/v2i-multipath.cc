@@ -53,20 +53,18 @@ using namespace ns3;
 /* we run in real-time , so no loggin is avilable  */
 //NS_LOG_COMPONENT_DEFINE ("MpFdExample");
 
-#define MAX_VEH_SPEED 120 // km/h
-#define MIN_VEH_SPEED 10  // Km/h
-#define MAX_JITTER    100 // ms
+#define MAX_VEH_SPEED       120 // km/h
+#define MIN_VEH_SPEED       10  // Km/h
+#define MAX_JITTER          100 // ms
 
 // Global variables for use in callbacks.
-double g_signalDbm;
-double average_RSU_conn_time; 
-double simTime = 60;          // sim time, 1 min by default
+double  g_signalDbm;                // RSU signal strenght 
+double  g_noiseDbm;                 // noise on 802.11 channel 
+ns3::Time g_last_cam_received;      // last cam received timestamp 
 
-//double g_noiseDbmAvg;
-//uint32_t g_samples;
+double  average_RSU_conn_time;      // not used at the momment       
+double  simTime =           60;     // sim time, 1 min by default
 
-/** NS-3 connection glob vars **/
-        
 int mptcpdFd;      // file descriptor to interact with mptcpd             
 
 /**
@@ -248,8 +246,10 @@ mptcpd_cmd_write (struct sspi_cmd_message const *msg)
     // connect to pipe if first time called
     if (mptcpdFd < 0)
         mptcpd_open_pipe ();
+    std::cout << "cmd: " << (int)msg->cmd << " val: " 
+                                            << msg->cmd_value << std::endl; 
     
-    std::cout << "cmd: " << (int)msg->cmd << " val: " << msg->cmd_value << std::endl; 
+    NS_ASSERT (sizeof (msg) < sizeof (sspi_message));  
     
     // create command message end send it
     struct sspi_message c_msg = {.type = SSPI_MSG_TYPE_CMD};
@@ -267,15 +267,17 @@ mptcpd_cmd_write (struct sspi_cmd_message const *msg)
  */
 
 void 
-mptcpd_data_write (struct sspi_data_message const *msg){
+mptcpd_data_write (struct sspi_data_message const &msg){
     
     // connect to pipe if first time called
     if (mptcpdFd < 0)
         mptcpd_open_pipe ();
 
+    NS_ASSERT (sizeof (msg) < sizeof (sspi_message));
+    
     // create message end send it
     struct sspi_message d_msg = {.type = SSPI_MSG_TYPE_DATA};
-    std::memcpy (d_msg.data, msg, sizeof (sspi_data_message));
+    std::memcpy (d_msg.data, &msg, sizeof (sspi_data_message));
     
     if (write (mptcpdFd, &d_msg, sizeof (d_msg)) < 0) {
         std::cout << "Can't write data to pipe \n";
@@ -324,6 +326,78 @@ void RunIperf ( int duration, bool repeat)
         } 
 }
 
+/**
+ * @brief create and send data message to mptcpd plugin periodicaly 
+ * 
+ * @param interval      between data msg's 
+ * @param rsu_mob       RSU mobility model
+ * @param sumoClient    SUMO client interface
+ * @param v_id          Vehicle id, normally ("veh1")   
+ */
+
+void send_data_to_plugin(   ns3::Time interval  , 
+                            Ptr<MobilityModel> rsu_mob,
+                            Ptr<TraciClient> sumoClient, 
+                            const std::string v_id )
+{
+    ns3::Time _now = Simulator::Now ();
+    
+    // prepare data msg to send
+    struct sspi_data_message msg_data {}; 
+    std::memset(&msg_data, 0, sizeof(msg_data)); 
+
+    /* get rsu related data  **/
+    msg_data.signal =   g_signalDbm;
+    msg_data.noise  =   g_noiseDbm; 
+
+    /* 
+     Get RSU position : As the position must be specified in (lat, lon), we must
+     take it from the mobility model and then  convert it to Latitude and Longitude
+     As SUMO is used here, we can rely on the TraCIAPI for this conversion
+    */
+    libsumo::TraCIPosition rsuPos = sumoClient->TraCIAPI::simulation.convertXYtoLonLat (
+                                rsu_mob->GetPosition ().x, 
+                                rsu_mob->GetPosition ().y) ;
+    
+    msg_data.rsu_pos_lat    =   rsuPos.x; 
+    msg_data.rsu_pos_lon    =   rsuPos.y; 
+    
+    // check if in coverage area of rsu (receive cam in last sec)
+    msg_data.rsu_connected = ((_now - g_last_cam_received).GetSeconds() > 1)? false:true ; 
+
+    /* get veh related data */
+    msg_data.veh_speed  =   sumoClient->TraCIAPI::vehicle.getSpeed(v_id); 
+    msg_data.veh_accel  =   sumoClient->TraCIAPI::vehicle.getAccel(v_id); 
+    msg_data.veh_angle  =   sumoClient->TraCIAPI::vehicle.getAngle(v_id); 
+    msg_data.veh_pos_lat =   sumoClient->TraCIAPI::vehicle.getPosition(v_id).x; 
+    msg_data.veh_pos_lon =   sumoClient->TraCIAPI::vehicle.getPosition(v_id).y;
+    msg_data.timestamp  =   _now.GetMilliSeconds();  
+
+    // send message to plugin
+    mptcpd_data_write (msg_data);
+
+    Simulator::Schedule (interval, &send_data_to_plugin, interval, 
+                                            rsu_mob, sumoClient, v_id); 
+}
+
+
+
+// //  class to handle callbacks from simpleCamSender when cam is received 
+// class Cam_receiver {
+     
+//     public: 
+//     void Receive_CAM_Callback (long rsu_id, double lat, double lon){
+//         std::cout<< "id " << rsu_id << " pos : " << lat << ", " << lon ; 
+//     }
+    
+//     void start_cam_calback (simpleCAMSenderHelper &SimpleCAMHelper){
+//          SimpleCAMHelper.SetAttribute ("CAMCallback", 
+//                      (CallbackValue) MakeCallback (&Cam_receiver::Receive_CAM_Callback, this));
+//     }
+
+// }; 
+
+
 
 /**
    * \brief TracedCallback signature for monitor mode receive events.
@@ -351,30 +425,22 @@ MonitorSniffRx (Ptr<const Packet> packet, uint16_t channelFreqMhz, WifiTxVector 
                 MpduInfo aMpdu, SignalNoiseDbm signalNoise, uint16_t staId)
 
 {
-    //std::cout << "addr" << hdr.GetAddr1() << std::endl;    // broadcast 
     // channelFreqMhz ==  5860
     WifiMacHeader hdr;
     packet->PeekHeader (hdr);
 
+    // filter RSU cams by mac .. 
     Mac48Address rsu_mac ("00:00:00:00:00:02"); 
     if (rsu_mac == hdr.GetAddr2()){
 
-        // prepare data msg to send
-        struct sspi_data_message msg_data = {.rss = signalNoise.signal, 
-                                            .noise = signalNoise.noise};
-
-        //NS_UNUSED (msg_data);
-        mptcpd_data_write (&msg_data);
+        g_signalDbm     =   signalNoise.signal  ;
+        g_noiseDbm      =   signalNoise.noise   ; 
+        g_last_cam_received = Simulator::Now ();
     }
 
     //   g_samples++;
     //   g_signalDbmAvg += ((signalNoise.signal - g_signalDbmAvg) / g_samples);
-    //   g_noiseDbmAvg += ((signalNoise.noise - g_noiseDbmAvg) / g_samples);
-
-    //   std::cout << Simulator::Now().GetSeconds()  
-    // Beacon size == 74 
-    // std::cout << " Packet size : " << packet->GetSize() << std::endl; 
-    //  double RSSI_T = -80; // RSSI Threashold value
+    //   g_noiseDbmAvg += ((signalNoise.noise - g_noiseDbmAvg) / g_samples); 
    
 }
 
@@ -407,7 +473,10 @@ main (int argc, char *argv[])
   mptcpdFd = -1 ;                 // file desc to connect to mptcpd plugin
   g_signalDbm = -85;              // init value rssi (dBm)
   average_RSU_conn_time = 0.0;    // to calculate av connection time on RSU
-  
+  g_last_cam_received = ns3::Time(0); // last cam received timestamp 
+
+  int data_send_interval = 200;   // interval in [ms] to send data message to mptcpd plugin 
+
   /*****  MS-VAN3T configuration *****/
   std::string m_vId = "veh1";     // sumo id of our first vehicle
   bool send_cam = true;           // enable CAM service on vehicles and RSU
@@ -444,10 +513,10 @@ main (int argc, char *argv[])
   cmd.AddValue ("maxSpeed", "initial max veh speed [km/h]", maxVehSpeed); 
   cmd.AddValue ("sumo-folder","Position of sumo config files",sumo_folder);
   cmd.AddValue ("mob-trace", "Name of the mobility trace file", mob_trace);
-  cmd.AddValue ("sumo-config", "Location and name of SUMO configuration file", 
-                                                 sumo_config);
+  cmd.AddValue ("sumo-config", "Location and name of SUMO configuration file", sumo_config);
   cmd.AddValue ("send-cam",
-                "Turn on or off the transmission of CAMs, thus turning on or off the whole V2X application",  send_cam);
+                "Turn on the CA service, thus turning on or off the whole V2X application",  send_cam);
+  cmd.AddValue ("inter-data", "interval in ms to send data message to mptcpd plugin", data_send_interval);
 
   // cmd.AddValue ("csv-log", "Name of the CSV log file", csv_name);
   // cmd.AddValue ("summary",
@@ -768,6 +837,11 @@ main (int argc, char *argv[])
         simpleCAMSenderHelper SimpleCAMHelper;
         SimpleCAMHelper.SetAttribute ("RealTime", BooleanValue (true));
         SimpleCAMHelper.SetAttribute ("Client", (PointerValue) sumoClient);
+        
+        // callback to retrive RSU position and.. dont compile with Callback 
+        // Cam_receiver cam_r ; 
+        // cam_r.start_cam_calback(SimpleCAMHelper); 
+
         if (nodeCounter == 0)
           SimpleCAMHelper.SetAttribute ("Interface", IntegerValue (ifIdxVeh));
         
@@ -973,7 +1047,6 @@ main (int argc, char *argv[])
   // **************************************************************************
   // **************************************************************************
   
-
   /* Broadcast UDP packets by RSU if CAM service is disabled*/ 
 
   if (!send_cam){
@@ -1018,12 +1091,19 @@ main (int argc, char *argv[])
       Simulator::Schedule (MilliSeconds (500), &RunTcpdump, simTime-1);
   }
 
-  // use MPTCPD PM to control subflows
-  // monitor 802.11p RF metrics for each received pack and sends commands 
-  // to set BACKUP flag
+  // use MPTCPD PM to control subflows: 
+  // 1. monitor 802.11p RF canal 
+  // 2. obtain vehicle data and send data message to plugin  
   if (use_mptcp_pm){
       Config::ConnectWithoutContext ("/NodeList/0/DeviceList/*/Phy/MonitorSnifferRx",
                                      MakeCallback (&MonitorSniffRx));
+
+      Ptr<ConstantPositionMobilityModel> mob = 
+                    nodeAP.Get(0)->GetObject<ConstantPositionMobilityModel> ();
+      Simulator::Schedule ( Seconds (1) + MilliSeconds(data_send_interval), 
+                            &send_data_to_plugin,  
+                            MilliSeconds(data_send_interval), 
+                            mob,    sumoClient,  m_vId) ;
   }
 
     /**
@@ -1033,8 +1113,6 @@ main (int argc, char *argv[])
         Simulator::Schedule (Seconds(iperfStart), &RunIperf, 
                                             iperf_duration, iperfReapeat);
     }
-  
-
 
   // Print debug info 
   if (verbose){
