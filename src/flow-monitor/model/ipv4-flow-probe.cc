@@ -227,7 +227,7 @@ Ipv4FlowProbe::Ipv4FlowProbe (Ptr<FlowMonitor> monitor,
     m_classifier (classifier)
 {
   NS_LOG_FUNCTION (this << node->GetId ());
-
+  m_nodeId = node->GetId(); 
   m_ipv4 = node->GetObject<Ipv4L3Protocol> ();
 
   if (!m_ipv4->TraceConnectWithoutContext ("SendOutgoing",
@@ -339,12 +339,32 @@ Ipv4FlowProbe::ForwardLogger (const Ipv4Header &ipHeader, Ptr<const Packet> ipPa
           return;
         }
 
+      if ( (ipHeader.GetDestination () == Ipv4Address ("13.0.0.2") ||
+           ipHeader.GetDestination () == Ipv4Address ("14.0.0.2")) &&
+          m_nodeId == 1)
+        {
+          Ipv4FlowProbe::ForwardUpLogger (ipHeader, ipPayload, interface);
+          return;
+        }
+
+      if ((ipHeader.GetDestination () == Ipv4Address ("11.0.0.2") ||
+           ipHeader.GetDestination () == Ipv4Address ("15.0.0.2")) &&
+          m_nodeId == 0)
+        {
+          Ipv4FlowProbe::ForwardUpLogger (ipHeader, ipPayload, interface);
+          return;
+        }
+
       FlowId flowId = fTag.GetFlowId ();
       FlowPacketId packetId = fTag.GetPacketId ();
 
       uint32_t size = (ipPayload->GetSize () + ipHeader.GetSerializedSize ());
       NS_LOG_DEBUG ("ReportForwarding ("<<this<<", "<<flowId<<", "<<packetId<<", "<<size<<");");
       m_flowMonitor->ReportForwarding (this, flowId, packetId, size);
+    }
+    else {
+      // no TAG found, mark packet on ghost node 
+      Ipv4FlowProbe::SendOutgoingLogger(ipHeader, ipPayload, interface); 
     }
 }
 

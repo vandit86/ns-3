@@ -33,6 +33,9 @@
 #include "ns3/applications-module.h" //<-- for app
 #include "ns3/netanim-module.h" //<-- for netanim
 
+#include "ns3/flow-monitor-helper.h" // <-- flow monitor 
+#include "ns3/flow-monitor-module.h"
+
 /*  required for sumo copling */
 #include "ns3/automotive-module.h"
 #include "ns3/traci-module.h"
@@ -117,13 +120,150 @@ JitterMonitor (Ptr<RealtimeSimulatorImpl> rt)
   Simulator::Schedule (MilliSeconds (500), &JitterMonitor, rt);
 }
 
+void 
+MonitorUeFlows (FlowMonitorHelper* fmhelper, Ptr<FlowMonitor> flowMon)
+{
+  flowMon->CheckForLostPackets();
+  Time curTime = Now ();
+  std::map<FlowId, FlowMonitor::FlowStats> flowStats = flowMon->GetFlowStats();
+  Ptr<Ipv4FlowClassifier> classifier = DynamicCast<Ipv4FlowClassifier> (fmhelper->GetClassifier());
+  std::cout<<"---------------------------------------------------------------------------"<<std::endl;
+  // std::map<FlowId, FlowMonitor::FlowStats>::const_iterator
+  // reverce iterator looking  
+  for (auto stats = flowStats.crbegin (); stats != flowStats.crend (); ++stats)
+  {
+    Ipv4FlowClassifier::FiveTuple t = classifier->FindFlow (stats->first);
+
+    std::cout<<"Flow ID : "     << stats->first <<" , "<< t.sourceAddress << ":" <<t.sourcePort
+                                <<" ---> "<<  t.destinationAddress << ":" << t.destinationPort 
+                                << " protocol: " << (uint)t.protocol 
+                                << std::endl;
+    
+    // std::cout << "\t Tx Bytes = " << stats->second.txBytes << std::endl;
+    // std::cout << "\t Rx Bytes = " << stats->second.rxBytes << std::endl;
+    std::cout << "\t Tx Packets = " << stats->second.txPackets << std::endl;
+    std::cout << "\t Rx Packets = " << stats->second.rxPackets << std::endl;
+    std::cout << "\t Time last RX = " << stats->second.timeLastRxPacket.GetSeconds() << std::endl;
+    std::cout << "\t Time last TX = " << stats->second.timeLastTxPacket.GetSeconds() << std::endl;
+    std::cout << "\t Last delay = " << stats->second.lastDelay.GetMilliSeconds() << std::endl;
+    std::cout << "\t jitter sum = " << stats->second.jitterSum.GetMilliSeconds() << std::endl;
+    std::cout << "\t lost packets sum = " << stats->second.lostPackets << std::endl;
+
+    std::cout<<"\t Duration: "<< stats->second.timeLastRxPacket.GetSeconds() - stats->second.timeFirstTxPacket.GetSeconds()<<std::endl;
+    std::cout<<"\t Throughput: " << stats->second.rxBytes * 8.0 / (stats->second.timeLastRxPacket.GetSeconds()-stats->second.timeFirstTxPacket.GetSeconds())/1024/1024  << " Mbps"<<std::endl;
+    // std::cout << "  Packets Lost Ratio: " << ((LostPacketsum * 100) / txPacketsum) << "%"
+    //           << "\n";
+
+    // REMOVE from map IF lastTimeTX > 1s ..?? or not concider
+    // or remove if TXpackets && RXpack on last interval = 0  
+
+  // for (std::map<FlowId, FlowMonitor::FlowStats>::const_iterator i = stats.begin ();
+  //      i != stats.end (); ++i)
+  //   {
+  //     txPacketsum += i->second.txPackets;
+  //     rxPacketsum += i->second.rxPackets;
+  //     LostPacketsum += i->second.lostPackets;
+  //     DropPacketsum += i->second.packetsDropped.size ();
+  //     Delaysum += i->second.delaySum.GetSeconds ();
+
+  //     rxFirstPacket = i->second.timeFirstRxPacket.GetSeconds ();
+  //     rxLastPacket = i->second.timeLastRxPacket.GetSeconds ();
+  //   }
+  // std::cout << "  All Tx Packets: " << txPacketsum << "\n";
+  // std::cout << "  All Rx Packets: " << rxPacketsum << "\n";
+  // std::cout << "  All Delay: " << Delaysum / txPacketsum << "\n";
+  // std::cout << "  All Lost Packets: " << LostPacketsum << "\n";
+  // std::cout << "  All Drop Packets: " << DropPacketsum << "\n";
+  
+  
+    // 2 .. 
+    // Ipv4FlowClassifier::FiveTuple t = classifier->FindFlow (i->first);
+    //   std::cout << "Flow " << i->first  << " (" << t.sourceAddress << " -> " << t.destinationAddress << ")\n";
+    //   std::cout << "  Tx Packets: " << i->second.txPackets << "\n";
+    //   std::cout << "  Tx Bytes:   " << i->second.txBytes << "\n";
+    //   std::cout << "  TxOffered:  " << i->second.txBytes * 8.0 / simulationEndTime.GetSeconds () / 1000 / 1000  << " Mbps\n";
+    //   std::cout << "  Rx Packets: " << i->second.rxPackets << "\n";
+    //   std::cout << "  Rx Bytes:   " << i->second.rxBytes << "\n";
+    //   std::cout << "  Throughput: " << i->second.rxBytes * 8.0 / simulationEndTime.GetSeconds () / 1000 / 1000  << " Mbps\n";
+
+    //  3.. 
+    //     Ipv4FlowClassifier::FiveTuple t = classifier->FindFlow (i->first);
+    // if ((t.sourceAddress == "10.1.1.3" && t.destinationAddress == "10.1.1.1"))
+    //   {
+    //     NS_LOG_INFO ("Flow " << i->first  << " (" << t.sourceAddress << " -> " << t.destinationAddress << ")\n");
+    //     NS_LOG_INFO ("  Tx Bytes:   " << i->second.txBytes << "\n");
+    //     NS_LOG_INFO ("  Rx Bytes:   " << i->second.rxBytes << "\n");
+    //     NS_LOG_UNCOND ("  Throughput to 10.1.1.1: " << i->second.rxBytes * 8.0 / (i->second.timeLastRxPacket.GetSeconds () - i->second.timeFirstTxPacket.GetSeconds ()) / 1024 / 1024  << " Mbps\n");
+    //     NS_LOG_INFO ("  Mean delay:   " << i->second.delaySum.GetSeconds () / i->second.rxPackets << "\n");
+    //     NS_LOG_INFO ("  Mean jitter:   " << i->second.jitterSum.GetSeconds () / (i->second.rxPackets - 1) << "\n");
+    //     NS_LOG_INFO ("  Tx Opp: " << 1 - (statisticsAp0.GetBusyTime () / simuTime));
+    //   }
+
+    // 4. 
+    //  Ipv4FlowClassifier::FiveTuple t = classifier->FindFlow (i->first);
+    //   std::stringstream protoStream;
+    //   protoStream << (uint16_t) t.protocol;
+    //   if (t.protocol == 6)
+    //     {
+    //       protoStream.str ("TCP");
+
+    // 5.. 
+    //  if (i->second.rxPackets > 0)
+    //     {
+    //       // Measure the duration of the flow from receiver's perspective
+    //       double rxDuration = i->second.timeLastRxPacket.GetSeconds () - i->second.timeFirstTxPacket.GetSeconds ();
+
+    //       averageFlowThroughput += i->second.rxBytes * 8.0 / rxDuration / 1000 / 1000;
+    //       averageFlowDelay += 1000 * i->second.delaySum.GetSeconds () / i->second.rxPackets;
+
+    //       outFile << "  Throughput: " << i->second.rxBytes * 8.0 / rxDuration / 1000 / 1000  << " Mbps\n";
+    //       outFile << "  Mean delay:  " << 1000 * i->second.delaySum.GetSeconds () / i->second.rxPackets << " ms\n";
+    //       //outFile << "  Mean upt:  " << i->second.uptSum / i->second.rxPackets / 1000/1000 << " Mbps \n";
+    //       outFile << "  Mean jitter:  " << 1000 * i->second.jitterSum.GetSeconds () / i->second.rxPackets  << " ms\n";
+    //     }
+
+    // // 
+    // // Measure the duration of the flow from sender's perspective
+    //   double rxDuration = i->second.timeLastTxPacket.GetSeconds () - i->second.timeFirstTxPacket.GetSeconds ();
+    //   double txOffered = i->second.txBytes * 8.0 / rxDuration / 1000.0 / 1000.0;
+
+    // 6.. can't be  used 
+  //   uint32_t packetsDroppedByQueueDisc = 0;
+  // uint64_t bytesDroppedByQueueDisc = 0;
+  // if (stats[1].packetsDropped.size () > Ipv4FlowProbe::DROP_QUEUE_DISC)
+  //   {
+  //     packetsDroppedByQueueDisc = stats[1].packetsDropped[Ipv4FlowProbe::DROP_QUEUE_DISC];
+  //     bytesDroppedByQueueDisc = stats[1].bytesDropped[Ipv4FlowProbe::DROP_QUEUE_DISC];
+  //   }
+  // std::cout << "  Packets/Bytes Dropped by Queue Disc:   " << packetsDroppedByQueueDisc
+  //           << " / " << bytesDroppedByQueueDisc << std::endl;
+  // uint32_t packetsDroppedByNetDevice = 0;
+  // uint64_t bytesDroppedByNetDevice = 0;
+  // if (stats[1].packetsDropped.size () > Ipv4FlowProbe::DROP_QUEUE)
+  //   {
+  //     packetsDroppedByNetDevice = stats[1].packetsDropped[Ipv4FlowProbe::DROP_QUEUE];
+  //     bytesDroppedByNetDevice = stats[1].bytesDropped[Ipv4FlowProbe::DROP_QUEUE];
+  //   }
+  // std::cout << "  Packets/Bytes Dropped by NetDevice:   " << packetsDroppedByNetDevice
+  //           << " / " << bytesDroppedByNetDevice << std::endl;
+  }
+
+
+  
+
+  
+  // Rescheduling the next call to this function to print throughput
+  Simulator::Schedule (Seconds (3), &MonitorUeFlows, fmhelper, flowMon);
+  
+}
+
+
 /**
  * @brief Generate UDP beacons on RSU if CAM service is disabled 
  * 
  * @param socket broadcast socket 
  * @param pktInterval interval im ms (default 100?)
  */
-
 static void 
 GenerateUdpBeacons (Ptr<Socket> socket, Time pktInterval )
 {
@@ -1093,17 +1233,17 @@ main (int argc, char *argv[])
 
   // use MPTCPD PM to control subflows: 
   // 1. monitor 802.11p RF canal 
-  // 2. obtain vehicle data and send data message to plugin  
+  // 2. schedule get vehicle data and send data message to plugin  
   if (use_mptcp_pm){
       Config::ConnectWithoutContext ("/NodeList/0/DeviceList/*/Phy/MonitorSnifferRx",
                                      MakeCallback (&MonitorSniffRx));
 
-      Ptr<ConstantPositionMobilityModel> mob = 
+      Ptr<ConstantPositionMobilityModel> rsuMob = 
                     nodeAP.Get(0)->GetObject<ConstantPositionMobilityModel> ();
       Simulator::Schedule ( Seconds (1) + MilliSeconds(data_send_interval), 
                             &send_data_to_plugin,  
                             MilliSeconds(data_send_interval), 
-                            mob,    sumoClient,  m_vId) ;
+                            rsuMob,    sumoClient,  m_vId) ;
   }
 
     /**
@@ -1158,6 +1298,14 @@ main (int argc, char *argv[])
 
     /*** 10. Setup and Start Simulation + Animation ***/
     // AnimationInterface anim ("ns3-sumo-coupling.xml"); // Mandatory
+    
+    FlowMonitorHelper flowHelper;
+    flowHelper.SetMonitorAttribute("MaxPerHopDelay", TimeValue (Seconds(1))); 
+    Ptr<FlowMonitor> ueMonitor = flowHelper.Install(nodes);
+    //Ptr<FlowMonitor> ueMonitor = flowHelper.InstallAll(); 
+
+    Simulator::Schedule (Seconds (1), &MonitorUeFlows, &flowHelper, ueMonitor);
+
     // Now, do the actual emulation.
     //
     NS_LOG_INFO ("Run Emulation.");
