@@ -61,15 +61,13 @@ using namespace ns3;
 #define MAX_JITTER          100 // ms
 
 // Global variables for use in callbacks.
-double  g_signalDbm;                // RSU signal strenght 
-double  g_noiseDbm;                 // noise on 802.11 channel 
-ns3::Time g_last_cam_received;      // last cam received timestamp 
-
-double  average_RSU_conn_time;      // not used at the momment       
+ns3::Time g_time_last_cam;          // last cam received timestamp 
+ns3::Time g_time_last_rsrp;         // last lte received timestamp 
+    
 double  simTime =           60;     // sim time, 1 min by default
 
 int mptcpdFd;                       // file descriptor to interact with mptcpd             
- std::string g_vId = "veh1";        // sumo id of our first vehicle
+std::string g_vId = "veh1";        // sumo id of our first vehicle
 
 // save flow and phy data to send to mptcpd plugin 
 struct sspi_phy_data g_phy_wlan; 
@@ -77,21 +75,6 @@ struct sspi_phy_data g_phy_lte;
 struct sspi_flow_data g_flow_wlan; 
 struct sspi_flow_data g_flow_lte; 
 
-// struct to save flow last measurments to porform calculation 
-typedef struct
-{
-  FlowId    id; 
-  uint64_t  l_delay_ms;
-  uint64_t  l_jitter_ms;
-  uint32_t  l_lost;
-  uint32_t  l_pkgRx;
-  uint32_t  l_pkgTx;
-  uint32_t  l_bytesTx;
-  uint32_t  l_bytesRx;
-
-} FlowLastData;
-
-std::vector<FlowLastData> g_flows;
 
 /**
    * Set the address of a previously added UE
@@ -171,7 +154,7 @@ PrintVehicleData ( Ptr<TraciClient> sumoClient){
   std::cout <<  Simulator::Now().GetSeconds() << " , "
             << traPos.getString() 
             << ", speed: " << vSpeed
-            << ", RSSI dBm: " << g_signalDbm
+            << ", RSSI dBm: " << g_phy_wlan.signal
             << std::endl;
 
   Simulator::Schedule (Seconds(1), &PrintVehicleData, sumoClient); 
@@ -358,147 +341,59 @@ void RunIperf ( int duration, bool repeat)
  * 
  * @param fmhelper 
  * @param flowMon 
- * @param interval 
  */
 
-void 
-MonitorUeFlows (FlowMonitorHelper*  fmhelper, 
-                Ptr<FlowMonitor>    flowMon , 
-                ns3::Time           interval)
+void
+MonitorUeFlows (FlowMonitorHelper *fmhelper, Ptr<FlowMonitor> flowMon) 
 {
   flowMon->CheckForLostPackets();
-  Time  curTime  =   Now ();
-  Time  delta    =   MilliSeconds(100); // time delta 
-  bool fWlan     =   false;
-  bool fLte      =   false;
-  struct sspi_flow_data* fp; 
+  Time  delta_first     =   MilliSeconds(100); // filter new flow  
+  Time  delta_last      =   MilliSeconds(500); // filter active flow 
+  struct sspi_flow_data* fp;
+
+  // reset values on struct 
+  g_flow_lte    =   {};
+  g_flow_wlan   =   {};
 
   std::map<FlowId, FlowMonitor::FlowStats> flowStats = flowMon->GetFlowStats();
   Ptr<Ipv4FlowClassifier> classifier = DynamicCast<Ipv4FlowClassifier> (fmhelper->GetClassifier());
-  std::cout<<"---------------------------------------------------------------------"<<std::endl;
   //std::map<FlowId, FlowMonitor::FlowStats>::const_iterator  // reverce iterator looking  
-
   for (auto stats = flowStats.rbegin (); stats != flowStats.rend (); ++stats)
   {
-    Ipv4FlowClassifier::FiveTuple t = classifier->FindFlow (stats->first);
+     Ipv4FlowClassifier::FiveTuple t = classifier->FindFlow (stats->first);
+   
+    // 1. check if connection is active: last time flow used
+    //    ignore "old" and "yang" flows   
+    Time l_time = ns3::Now() - std::max (stats->second.timeLastRxPacket, stats->second.timeLastTxPacket);
+    Time f_time = stats->second.timeLastRxPacket - stats->second.timeFirstTxPacket;
 
-    // 1. filter by source addr : && t.destinationAddress == "13.0.0.2"
-    // break when we found firs 2 corresponding flows, dont concider other flows 
-    if (fWlan && fLte) break;                                        
-    else if (t.sourceAddress == "11.0.0.2" && !fLte) {
-        fLte    =   true;   
-        fp      =   &g_flow_lte; 
-    }
-    else if (t.sourceAddress == "15.0.0.2" && !fWlan){
-        fWlan   =   true;
-        fp      =   &g_flow_wlan; 
-    } 
-    else continue; 
+    if (l_time > delta_last || f_time < delta_first || !stats->second.rxPackets ||
+        !stats->second.rxPackets)
+      continue;
 
-    // 2. get current flow statistics 
-    uint64_t delay_ms   =   stats->second.delaySum.GetMilliSeconds()  ; 
-    uint64_t jitter_ms  =   stats->second.jitterSum.GetMilliSeconds() ;  
-    uint32_t lost       =   stats->second.lostPackets ; 
-    uint32_t pkgRx      =   stats->second.rxPackets   ; 
-    uint32_t pkgTx      =   stats->second.txPackets   ; 
-    uint32_t bytesTx    =   stats->second.txBytes     ; 
-    uint32_t bytesRx    =   stats->second.rxBytes     ;   
-
-    // 3. find flow in vector
-    FlowId f_id = stats->first;
-    auto lastFlow = std::find_if (begin (g_flows), end (g_flows),
-                              [&] (const FlowLastData &data) { return data.id == f_id; });
-
-    // data that will be send to plugin 
-    double  avg_delay_ms    =   0.0;  
-    double  avg_jitter_ms   =   0.0;
-    double  duration_ms     =   0.0;
-    double  plr             =   0.0; 
-    double  txRate          =   0.0; 
-    double  rxRate          =   0.0; 
-    
-    // connection duration 
-    Time d_time = stats->second.timeLastRxPacket - stats->second.timeFirstTxPacket;
-    // last time flow used 
-    Time l_time = curTime - stats->second.timeLastRxPacket ; 
-
-    // 3a.  if flow exists: calculate real time metrics (check zero division)
-    //      ignore "old" and "yang" flows 
-    if (    lastFlow != g_flows.end ()
-            &&  d_time > delta  
-            &&  l_time < delta  
-            &&  pkgRx!=lastFlow->l_pkgRx 
-            &&  pkgTx!=lastFlow->l_pkgTx)
-      {
-        avg_delay_ms = (delay_ms - lastFlow->l_delay_ms) / (double)(pkgRx - lastFlow->l_pkgRx);     // delay (ms)
-        avg_jitter_ms = (jitter_ms - lastFlow->l_jitter_ms) / (double)(pkgRx - lastFlow->l_pkgRx);  // jitter (ms)
-        plr = (lost - lastFlow->l_lost) / (double)(pkgTx - lastFlow->l_pkgTx);                      // PLR    (0:1)
-        txRate = ((bytesTx - lastFlow->l_bytesTx) * 8.0) / (1024 * 1024 * interval.GetSeconds ()); // Tx Mbps
-        rxRate = ((bytesRx - lastFlow->l_bytesRx) * 8.0) / (1024 * 1024 * interval.GetSeconds ()); // Rx Mbps
-        duration_ms = stats->second.timeLastRxPacket.GetMilliSeconds() - stats->second.timeFirstTxPacket.GetMilliSeconds(); 
-      }
-
-    // 3b. if not exists in the list : create and insert new Flow
+    // 2. select flow to write based on source addr
+    if (t.sourceAddress == "11.0.0.2" || t.sourceAddress == "13.0.0.2")
+      fp = &g_flow_lte;
+    else if (t.sourceAddress == "15.0.0.2" || t.sourceAddress == "14.0.0.2")
+      fp = &g_flow_wlan;
     else
-      {
-        g_flows.push_back (FlowLastData ());
-        lastFlow = g_flows.end () - 1; // last inserted flow
-      }
+      continue;
 
-    // 4. update flow last data 
-    lastFlow->id          =   f_id      ; 
-    lastFlow->l_delay_ms  =   delay_ms  ; 
-    lastFlow->l_jitter_ms =   jitter_ms ;
-    lastFlow->l_lost      =   lost      ; 
-    lastFlow->l_bytesRx   =   bytesRx   ; 
-    lastFlow->l_pkgRx     =   pkgRx     ; 
-    lastFlow->l_bytesTx   =   bytesTx   ; 
-    lastFlow->l_pkgTx     =   pkgTx     ;
+    // 3. get current flow statistics 
+    double delay_ms   =   stats->second.delaySum.GetMilliSeconds() * 1.0 / stats->second.rxPackets; 
+    double jitter_ms  =   stats->second.jitterSum.GetMilliSeconds() * 1.0 / (stats->second.rxPackets-1);  
+    double plr        =   stats->second.lostPackets * 1.0 / stats->second.txPackets;
+	  double data_rate   =  stats->second.txBytes * 8.0 / f_time.GetSeconds() / 1024 / 1024;
+    int64_t duration_ms =  f_time.GetMilliSeconds();
 
-    // 5. update global flow struct
-    fp->delay       =   avg_delay_ms    ;
-    fp->jitter      =   avg_jitter_ms   ; 
-    fp->plr         =   plr             ;
-    fp->rate        =   txRate          ;   // TODO max (tx,rx) ? 
-    fp->duration    =   duration_ms     ; 
-
-
-    std::cout << "Flow ID : " << f_id << " , " << t.sourceAddress << ":" << t.sourcePort
-              << " ---> " << t.destinationAddress << ":" << t.destinationPort
-              << " protocol: " << (uint) t.protocol << std::endl;
-    
-    // std::cout << "\t Tx Bytes = " << stats->second.txBytes << std::endl;
-    // std::cout << "\t Rx Bytes = " << stats->second.rxBytes << std::endl;
-    
-    // std::cout << "\t Tx Packets = " << stats->second.txPackets << std::endl;
-    // std::cout << "\t Rx Packets = " << stats->second.rxPackets << std::endl;
-    
-    // std::cout << "\t Time last RX = " << stats->second.timeLastRxPacket.GetSeconds() << std::endl;
-    // std::cout << "\t Time last TX = " << stats->second.timeLastTxPacket.GetSeconds() << std::endl;
-    
-    // std::cout << "\t Delay sum = " << stats->second.delaySum.GetMilliSeconds() << std::endl;
-    // std::cout << "\t Jitter sum = " << stats->second.jitterSum.GetMilliSeconds() << std::endl;
-    
-    // std::cout << "\t lost packets sum = " << stats->second.lostPackets << std::endl;
-    // std::cout << "\t l_lost packets sum = " << lastFlow->l_lost << std::endl;
-    
-    // std::cout << "\t Duration: "<< stats->second.timeLastRxPacket.GetSeconds() - stats->second.timeFirstTxPacket.GetSeconds()<<std::endl;
-    // std::cout << "\t Throughput: " << stats->second.rxBytes * 8.0 / (stats->second.timeLastRxPacket.GetSeconds()-stats->second.timeFirstTxPacket.GetSeconds())/1024/1024  << " Mbps"<<std::endl;
-    // std::cout << std::endl; 
-    
-
-    // print current metrics 
-    std::cout << "\t delay: = "     << avg_delay_ms     << std::endl; 
-    std::cout << "\t jitter: = "    << avg_jitter_ms    << std::endl; 
-    std::cout << "\t plr: = "       << plr              << std::endl; 
-    std::cout << "\t txRate: = "    << txRate           << std::endl; 
-    std::cout << "\t rxRate: = "    << rxRate           << std::endl;
-    std::cout << "\t duration: = "  << duration_ms      << std::endl;
-
-    // REMOVE from map IF lastTimeTX > 1s ..?? or not concider
-    // or remove if TXpackets && RXpack on last interval = 0
+	// 4. update global flow struct
+    fp->delay       =   (fp->delay > delay_ms )? fp->delay : delay_ms ;
+    fp->jitter      =   (fp->jitter > jitter_ms )? fp->jitter : jitter_ms ; 
+    fp->plr         =   (fp->plr > plr )? fp->plr : plr         ;
+    fp->rate        =   (fp->rate > data_rate )? fp->rate : data_rate ;    
+    fp->duration    =   (fp->duration > duration_ms) ? fp->duration : duration_ms ;
+     //FlowId f_id = stats->first;	// folow id if nedded ?? 
   }
-  
 }
 
 
@@ -517,48 +412,84 @@ void send_data_to_plugin (  ns3::Time interval          ,
                             FlowMonitorHelper* fmhelper , 
                             Ptr<FlowMonitor> flowMon    )
 {
-    // get tcp/ip metrics on each path, save results on global struct 
-    MonitorUeFlows (fmhelper, flowMon, interval);
     
-    // ns3::Time _now = Simulator::Now ();
+    // prepare data msg to send
+    struct sspi_data_message msg_data   = {}; // all data
     
-    // // prepare data msg to send
-    // struct sspi_data_message msg_data {}; 
-    // std::memset(&msg_data, 0, sizeof(msg_data)); 
+    /// 1. get tcp/ip metrics on each path, save results on global struct 
+    MonitorUeFlows (fmhelper, flowMon);
+    
+    msg_data.flow_lte   =   g_flow_lte  ;
+    msg_data.flow_wlan  =   g_flow_wlan ;       
 
-    /* get rsu related data  **/
-    // msg_data.signal =   g_signalDbm;
-    // msg_data.noise  =   g_noiseDbm; 
 
+    /// 2. Write PHY data of each link, if connected
+    //    check if in coverage area of rsu and eNb (receive cam in last sec)
     /* 
      Get RSU position : As the position must be specified in (lat, lon), we must
      take it from the mobility model and then  convert it to Latitude and Longitude
      As SUMO is used here, we can rely on the TraCIAPI for this conversion
     */
-    // libsumo::TraCIPosition rsuPos = sumoClient->TraCIAPI::simulation.convertXYtoLonLat (
-    //                             rsu_mob->GetPosition ().x, 
-    //                             rsu_mob->GetPosition ().y) ;
-    
-    // msg_data.rsu_pos_lat    =   rsuPos.x; 
-    // msg_data.rsu_pos_lon    =   rsuPos.y; 
-    
-    // // check if in coverage area of rsu (receive cam in last sec)
-    // msg_data.rsu_connected = ((_now - g_last_cam_received).GetSeconds() > 1)? false:true ; 
 
-    // /* get veh related data */
-    // msg_data.veh_speed  =   sumoClient->TraCIAPI::vehicle.getSpeed(v_id); 
-    // msg_data.veh_accel  =   sumoClient->TraCIAPI::vehicle.getAccel(v_id); 
-    // msg_data.veh_angle  =   sumoClient->TraCIAPI::vehicle.getAngle(v_id); 
-    // msg_data.veh_pos_lat =   sumoClient->TraCIAPI::vehicle.getPosition(v_id).x; 
-    // msg_data.veh_pos_lon =   sumoClient->TraCIAPI::vehicle.getPosition(v_id).y;
-    // msg_data.timestamp  =   _now.GetMilliSeconds();  
+    if ((Simulator::Now () - g_time_last_cam).GetMilliSeconds () < SSPI_LINK_LOST_MS){
+        libsumo::TraCIPosition rsuPos = sumoClient->TraCIAPI::simulation.convertXYtoLonLat (
+            rsu_mob->GetPosition ().x, rsu_mob->GetPosition ().y);
+        g_phy_wlan.pos_lat = rsuPos.x;
+        g_phy_wlan.pos_lon = rsuPos.y;
+        
+        msg_data.phy_wlan = g_phy_wlan;
+    }
+
+    if ((Simulator::Now () - g_time_last_rsrp).GetMilliSeconds () < SSPI_LINK_LOST_MS){
+        libsumo::TraCIPosition eNbPos = sumoClient->TraCIAPI::simulation.convertXYtoLonLat (
+            eNb_mob->GetPosition ().x, eNb_mob->GetPosition ().y);
+        g_phy_lte.pos_lat = eNbPos.x;
+        g_phy_lte.pos_lon = eNbPos.y;
+        
+        msg_data.phy_lte = g_phy_lte;
+    }
+
+    /// 3. Get vehicle data 
+    msg_data.veh.speed  =   sumoClient->TraCIAPI::vehicle.getSpeed(g_vId); 
+    msg_data.veh.accel  =   sumoClient->TraCIAPI::vehicle.getAccel(g_vId); 
+    msg_data.veh.angle  =   sumoClient->TraCIAPI::vehicle.getAngle(g_vId); 
+    msg_data.veh.pos_lat =   sumoClient->TraCIAPI::vehicle.getPosition(g_vId).x; 
+    msg_data.veh.pos_lon =   sumoClient->TraCIAPI::vehicle.getPosition(g_vId).y;
+    
+    msg_data.timestamp_ms  =  Simulator::Now().GetMilliSeconds();  
 
     // send message to plugin
    // mptcpd_data_write (msg_data);
 
-    Simulator::Schedule (interval, &send_data_to_plugin, interval, rsu_mob, eNb_mob, 
-                                         sumoClient, 
-                                         fmhelper, flowMon); 
+   
+        // print current metrics 
+    std::cout <<  "\t delay: = \t\t\t"    << msg_data.flow_lte.delay     <<"\t\t" << msg_data.flow_wlan.delay     << std::endl; 
+    std::cout << "\t jitter: = \t\t\t"    << msg_data.flow_lte.jitter    <<"\t\t" << msg_data.flow_wlan.jitter    << std::endl; 
+    std::cout << "\t plr: = \t\t\t"       << msg_data.flow_lte.plr       <<"\t\t" << msg_data.flow_wlan.plr       << std::endl; 
+    std::cout << "\t txRate: = \t\t\t"    << msg_data.flow_lte.rate      <<"\t\t" << msg_data.flow_wlan.rate      << std::endl; 
+    std::cout << "\t duration: = \t\t\t"  << msg_data.flow_lte.duration  <<"\t\t" << msg_data.flow_wlan.duration  << std::endl;
+
+  std::cout  << std::endl;
+
+  std::cout << "\t signal: = \t\t\t" << msg_data.phy_lte.signal << "\t\t" << msg_data.phy_wlan.signal << std::endl;
+  std::cout << "\t lon: = \t\t\t" << msg_data.phy_lte.pos_lon << "\t\t" << msg_data.phy_wlan.pos_lon << std::endl;
+  std::cout << "\t lat: = \t\t\t" << msg_data.phy_lte.pos_lat << "\t\t" << msg_data.phy_wlan.pos_lat << std::endl;
+  std::cout << "\t connected: = \t\t\t" << msg_data.phy_lte.is_connected << "\t\t" << msg_data.phy_wlan.is_connected << std::endl;
+  
+  std::cout  << std::endl;
+
+  std::cout << "\t v_speed: = \t\t\t" << msg_data.veh.speed << std::endl;
+  std::cout << "\t v_acc: = \t\t\t" << msg_data.veh.accel << std::endl;
+  std::cout << "\t v_lat: = \t\t\t" << msg_data.veh.pos_lat << std::endl;
+  std::cout << "\t v_lon: = \t\t\t" << msg_data.veh.pos_lon << std::endl;
+  std::cout << "\t v_angle: = \t\t\t" << msg_data.veh.angle << std::endl;
+  
+  std::cout << "\t timestamp : = \t\t\t" << msg_data.timestamp_ms << std::endl;
+
+  std::cout  << "---------------------------------------------------------" <<std::endl;
+
+  Simulator::Schedule (interval, &send_data_to_plugin, interval, rsu_mob, eNb_mob, sumoClient,
+                       fmhelper, flowMon); 
 }
 
 /**
@@ -593,27 +524,42 @@ MonitorSniffRx (Ptr<const Packet> packet, uint16_t channelFreqMhz, WifiTxVector 
     // filter RSU cams by mac .. TODO - Improve ? 
     Mac48Address rsu_mac ("00:00:00:00:00:02"); 
     if (rsu_mac == hdr.GetAddr2()){
-        g_signalDbm     =   signalNoise.signal  ;
-        g_noiseDbm      =   signalNoise.noise   ; 
-        g_last_cam_received = Simulator::Now ();
+        g_phy_wlan.signal     =   signalNoise.signal  ;
+        g_phy_wlan.noise      =   signalNoise.noise   ;
+        g_phy_wlan.is_connected = true; 
+        g_time_last_cam = Simulator::Now ();
     }
-
-    //   g_samples++;
-    //   g_signalDbmAvg += ((signalNoise.signal - g_signalDbmAvg) / g_samples);
-    //   g_noiseDbmAvg += ((signalNoise.noise - g_noiseDbmAvg) / g_samples); 
 }
 
+/**
+ * @brief 
+ * 
+ * @param rnti 
+ * @param cellId 
+ * @param rsrp  Reference Signal Received Power
+ * @param rsrq 
+ * @param servingCell 
+ * @param componentCarrierId 
+ */
 void 
 MonitorUeCallback(uint16_t rnti, uint16_t cellId, double rsrp, 
                   double rsrq, bool servingCell, uint8_t componentCarrierId)
 {
-    std::cout << "UE serving cellId " << cellId 
-              << " Rxed RSRP: " << rsrp 
-              << " rnti: " << rnti  
-              << " RSRQ: " << rsrq 
-              << " serving cell " << servingCell 
-              << " component car id: "<< componentCarrierId
-			  << std::endl; 
+    g_phy_lte.signal = rsrp;
+    g_phy_lte.is_connected = true;  
+    g_time_last_rsrp = Simulator::Now ();
+
+    // connection is concidered to be lost if rsrp <= -100 dBm
+    // g_phy_lte.is_connected = (rsrp > -100 )? true : false; 
+    // g_phy_lte.is_connected = (g_phy_lte.is_connected && servingCell); 
+
+    // std::cout << "UE serving cellId " << cellId 
+    //           << " Rxed RSRP: " << rsrp 
+    //           << " rnti: " << rnti  
+    //           << " RSRQ: " << rsrq 
+    //           << " serving cell " << servingCell 
+    //           << " component car id: "<< componentCarrierId
+		// 	  << std::endl; 
 }
 
 // ***************************************************************************
@@ -643,16 +589,17 @@ main (int argc, char *argv[])
   int iperf_duration = 0;         // start iperf session time is sec 
   int iperfStart = 1 ;            // start generate traffic from time  
   mptcpdFd = -1 ;                 // file desc to connect to mptcpd plugin
-  g_signalDbm = -85;              // init value rssi (dBm)
-  average_RSU_conn_time = 0.0;    // to calculate av connection time on RSU
-  g_last_cam_received = ns3::Time(0); // last cam received timestamp 
+  
+  g_time_last_cam = ns3::Time(0); // last cam received timestamp 
+  g_time_last_rsrp = ns3::Time(0); // last cam received timestamp 
 
-  int data_send_interval = 200;   // interval in [ms] to send data message to mptcpd plugin 
+  int data_send_interval_ms = 200;   // interval in [ms] to send data message to mptcpd plugin
+  Time data_send_interval;  
 
   /*****  MS-VAN3T configuration *****/
  
-  bool send_cam = true;           // enable CAM service on vehicles and RSU
-  uint32_t rsu_cam_interval_ms = 200; // cam generation interval by RSU (ms)
+  bool send_cam = true;                 // enable CAM service on vehicles and RSU
+  uint32_t rsu_cam_interval_ms = 200;   // cam generation interval by RSU (ms)
   
   // double m_baseline_prr = 150.0;
   // bool m_prr_sup = false;
@@ -688,7 +635,7 @@ main (int argc, char *argv[])
   cmd.AddValue ("sumo-config", "Location and name of SUMO configuration file", sumo_config);
   cmd.AddValue ("send-cam",
                 "Turn on the CA service, thus turning on or off the whole V2X application",  send_cam);
-  cmd.AddValue ("inter-data", "interval in ms to send data message to mptcpd plugin", data_send_interval);
+  cmd.AddValue ("inter-data", "interval in ms to send data message to mptcpd plugin", data_send_interval_ms);
 
   // cmd.AddValue ("csv-log", "Name of the CSV log file", csv_name);
   // cmd.AddValue ("summary",
@@ -714,6 +661,9 @@ main (int argc, char *argv[])
   // @TODO check some input param errors, make this better and informative 
   if (simTime < iperfStart) iperfStart = 0 ;  
   if (simTime < iperf_duration) iperf_duration = 0 ;
+
+  if (data_send_interval_ms > 0)
+    data_send_interval = MilliSeconds (data_send_interval_ms); 
 
   // Turn on simulation in real-time mode  
   GlobalValue::Bind ("SimulatorImplementationType", 
@@ -1299,14 +1249,9 @@ main (int argc, char *argv[])
       Ptr<ConstantPositionMobilityModel> eNb_mob =
           enbNode.Get (0)->GetObject<ConstantPositionMobilityModel> ();
 
-      Simulator::Schedule (Seconds (1) + MilliSeconds (data_send_interval), 
-                            &send_data_to_plugin,
-                            MilliSeconds (data_send_interval), 
-                            rsu_mob, 
-                            eNb_mob,
-                            sumoClient, 
-                            &flowHelper, 
-                            ueMonitor);
+      Simulator::Schedule (Seconds (1) + data_send_interval, &send_data_to_plugin,
+                           data_send_interval, rsu_mob, eNb_mob, sumoClient,
+                           &flowHelper, ueMonitor);
     }
 
     /**
