@@ -398,6 +398,68 @@ MonitorUeFlows (FlowMonitorHelper *fmhelper, Ptr<FlowMonitor> flowMon)
 
 
 /**
+ * @brief estimate connection time with RSU, based on 
+ * vehicle/RSU position and veh speed 
+ * @param sumoClient 
+ * @param rsu_mob 
+ * @return double connection time left, -1 if not connected to RSU  
+ */
+double calc_rsu_connection_time (Ptr<TraciClient> sumoClient, Ptr<MobilityModel> rsu_mob){
+  
+  double c_time = -1.0, v_speed, v_angle, v_pos_x, v_pos_y, rsu_pos_x, rsu_pos_y;
+
+  v_speed = sumoClient->TraCIAPI::vehicle.getSpeed (g_vId);
+  v_angle = sumoClient->TraCIAPI::vehicle.getAngle (g_vId);
+  v_pos_x = sumoClient->TraCIAPI::vehicle.getPosition (g_vId).x;
+  v_pos_y = sumoClient->TraCIAPI::vehicle.getPosition (g_vId).y;
+  rsu_pos_x =  rsu_mob->GetPosition ().x; 
+  rsu_pos_y =  rsu_mob->GetPosition ().y; 
+
+  const double PI = 3.14159265; 
+  const double TWOPI = 6.2831853071795865;
+  const double RAD2DEG = 57.2957795130823209;
+  const double RADIUS 	= 	SSPI_RSU_RADIUS; 	// coverage radius (82) [m]
+
+  /// 2. distance veh - rsu 
+  double v2rsuDist = sqrt (pow (rsu_pos_x - v_pos_x, 2) + pow (rsu_pos_y - v_pos_y, 2));
+
+  /// 3. get angles and estimate connection time 
+  if (RADIUS > v2rsuDist)
+    {
+      // calc bearing angle from veh to rsu :
+      // based on https://math.stackexchange.com/questions/1596513/find-the-bearing-angle-between-two-points-in-a-2d-space
+      // if (a1 = b1 and a2 = b2) throw an error
+      // double theta = atan2(b1 - a1, a2 - b2);
+      double theta = atan2 (v_pos_x - rsu_pos_x, rsu_pos_y - v_pos_y);
+      if (theta < 0.0)
+        theta += TWOPI;
+      theta = TWOPI - theta; // in rad , in deg RAD2DEG * (theta)
+      v_angle = v_angle / RAD2DEG; // convert to rad
+      if (v_angle > theta)
+        theta = v_angle - theta;
+      else if (v_angle == theta)
+        theta = 0.01;
+      else
+        theta = theta - v_angle;
+      if (theta > PI)
+        theta = TWOPI - theta;
+
+      double betha = asin (v2rsuDist * sin (theta) / RADIUS);
+      double alpha = PI - theta - betha;
+      double dist = sqrt (v2rsuDist*v2rsuDist + RADIUS*RADIUS - 2*v2rsuDist*RADIUS*cos(alpha));
+      c_time = dist / v_speed;
+      //   std::cout << " distance: = " << v2rsuDist << std::endl;
+      //   std::cout << " theta: = " << RAD2DEG * theta << std::endl;
+      //   std::cout << " betha: = " << RAD2DEG * betha << std::endl;
+      //   std::cout << " aplha: = " << RAD2DEG * alpha << std::endl;
+      //   std::cout << " dist: = " << dist << std::endl;
+      //   std::cout << " c_time: = " << c_time << std::endl;
+    }
+
+  return c_time;
+}
+
+/**
  * @brief create and send data message to mptcpd plugin periodicaly 
  * 
  * @param interval      between data msg's 
@@ -458,37 +520,38 @@ void send_data_to_plugin (  ns3::Time interval          ,
     
     msg_data.timestamp_ms  =  Simulator::Now().GetMilliSeconds();  
 
-    // send message to plugin
-   // mptcpd_data_write (msg_data);
-
-   
-        // print current metrics 
+    // print current metrics 
     std::cout <<  "\t delay: = \t\t\t"    << msg_data.flow_lte.delay     <<"\t\t" << msg_data.flow_wlan.delay     << std::endl; 
     std::cout << "\t jitter: = \t\t\t"    << msg_data.flow_lte.jitter    <<"\t\t" << msg_data.flow_wlan.jitter    << std::endl; 
     std::cout << "\t plr: = \t\t\t"       << msg_data.flow_lte.plr       <<"\t\t" << msg_data.flow_wlan.plr       << std::endl; 
     std::cout << "\t txRate: = \t\t\t"    << msg_data.flow_lte.rate      <<"\t\t" << msg_data.flow_wlan.rate      << std::endl; 
     std::cout << "\t duration: = \t\t\t"  << msg_data.flow_lte.duration  <<"\t\t" << msg_data.flow_wlan.duration  << std::endl;
 
-  std::cout  << std::endl;
+    std::cout  << std::endl;
 
-  std::cout << "\t signal: = \t\t\t" << msg_data.phy_lte.signal << "\t\t" << msg_data.phy_wlan.signal << std::endl;
-  std::cout << "\t lon: = \t\t\t" << msg_data.phy_lte.pos_lon << "\t\t" << msg_data.phy_wlan.pos_lon << std::endl;
-  std::cout << "\t lat: = \t\t\t" << msg_data.phy_lte.pos_lat << "\t\t" << msg_data.phy_wlan.pos_lat << std::endl;
-  std::cout << "\t connected: = \t\t\t" << msg_data.phy_lte.is_connected << "\t\t" << msg_data.phy_wlan.is_connected << std::endl;
-  
-  std::cout  << std::endl;
+    std::cout << "\t signal: = \t\t\t" << msg_data.phy_lte.signal << "\t\t" << msg_data.phy_wlan.signal << std::endl;
+    std::cout << "\t lat: = \t\t\t" << msg_data.phy_lte.pos_lat << "\t\t" << msg_data.phy_wlan.pos_lat << std::endl;
+    std::cout << "\t lon: = \t\t\t" << msg_data.phy_lte.pos_lon << "\t\t" << msg_data.phy_wlan.pos_lon << std::endl;
+    std::cout << "\t connected: = \t\t\t" << msg_data.phy_lte.is_connected << "\t\t" << msg_data.phy_wlan.is_connected << std::endl;
+    
+    std::cout  << std::endl;
 
-  std::cout << "\t v_speed: = \t\t\t" << msg_data.veh.speed << std::endl;
-  std::cout << "\t v_acc: = \t\t\t" << msg_data.veh.accel << std::endl;
-  std::cout << "\t v_lat: = \t\t\t" << msg_data.veh.pos_lat << std::endl;
-  std::cout << "\t v_lon: = \t\t\t" << msg_data.veh.pos_lon << std::endl;
-  std::cout << "\t v_angle: = \t\t\t" << msg_data.veh.angle << std::endl;
-  
-  std::cout << "\t timestamp : = \t\t\t" << msg_data.timestamp_ms << std::endl;
+    std::cout << "\t v_speed: = \t\t\t" << msg_data.veh.speed << std::endl;
+    std::cout << "\t v_acc: = \t\t\t" << msg_data.veh.accel << std::endl;
+    std::cout << "\t v_lat: = \t\t\t" << msg_data.veh.pos_lat << std::endl;
+    std::cout << "\t v_lon: = \t\t\t" << msg_data.veh.pos_lon << std::endl;
+    std::cout << "\t v_angle: = \t\t\t" << msg_data.veh.angle << std::endl;
+    
+    std::cout << "\t timestamp : = \t\t\t" << msg_data.timestamp_ms << std::endl;
 
-  std::cout  << "---------------------------------------------------------" <<std::endl;
-
-  Simulator::Schedule (interval, &send_data_to_plugin, interval, rsu_mob, eNb_mob, sumoClient,
+    double c_time = calc_rsu_connection_time (sumoClient, rsu_mob); 
+    std::cout << "\t conn time : = \t\t\t" << c_time << std::endl;
+    std::cout  << "---------------------------------------------------------" <<std::endl;
+  	
+	// send message to plugin
+    // mptcpd_data_write (msg_data);
+	
+  	Simulator::Schedule (interval, &send_data_to_plugin, interval, rsu_mob, eNb_mob, sumoClient,
                        fmhelper, flowMon); 
 }
 
