@@ -367,8 +367,7 @@ MonitorUeFlows (FlowMonitorHelper *fmhelper, Ptr<FlowMonitor> flowMon)
     Time l_time = ns3::Now() - std::max (stats->second.timeLastRxPacket, stats->second.timeLastTxPacket);
     Time f_time = stats->second.timeLastRxPacket - stats->second.timeFirstTxPacket;
 
-    if (l_time > delta_last || f_time < delta_first || !stats->second.rxPackets ||
-        !stats->second.rxPackets)
+    if (l_time > delta_last || f_time < delta_first || !stats->second.rxPackets)
       continue;
 
     // 2. select flow to write based on source addr
@@ -382,7 +381,7 @@ MonitorUeFlows (FlowMonitorHelper *fmhelper, Ptr<FlowMonitor> flowMon)
     // 3. get current flow statistics 
     double delay_ms   =   stats->second.delaySum.GetMilliSeconds() * 1.0 / stats->second.rxPackets; 
     double jitter_ms  =   stats->second.jitterSum.GetMilliSeconds() * 1.0 / (stats->second.rxPackets-1);  
-    double plr        =   stats->second.lostPackets * 1.0 / stats->second.txPackets;
+    double plr        =   stats->second.lostPackets * 100.0 / stats->second.txPackets;
 	  double data_rate   =  stats->second.txBytes * 8.0 / f_time.GetSeconds() / 1024 / 1024;
     int64_t duration_ms =  f_time.GetMilliSeconds();
 
@@ -406,7 +405,8 @@ MonitorUeFlows (FlowMonitorHelper *fmhelper, Ptr<FlowMonitor> flowMon)
  */
 double calc_rsu_connection_time (Ptr<TraciClient> sumoClient, Ptr<MobilityModel> rsu_mob){
   
-  double c_time = -1.0, v_speed, v_angle, v_pos_x, v_pos_y, rsu_pos_x, rsu_pos_y;
+  double c_time = 0.01; // [sec] 
+  double v_speed, v_angle, v_pos_x, v_pos_y, rsu_pos_x, rsu_pos_y;
 
   v_speed = sumoClient->TraCIAPI::vehicle.getSpeed (g_vId);
   v_angle = sumoClient->TraCIAPI::vehicle.getAngle (g_vId);
@@ -419,6 +419,8 @@ double calc_rsu_connection_time (Ptr<TraciClient> sumoClient, Ptr<MobilityModel>
   const double TWOPI = 6.2831853071795865;
   const double RAD2DEG = 57.2957795130823209;
   const double RADIUS 	= 	SSPI_RSU_RADIUS; 	// coverage radius (82) [m]
+  
+  NS_ASSERT(RADIUS > 0); 
 
   /// 2. distance veh - rsu 
   double v2rsuDist = sqrt (pow (rsu_pos_x - v_pos_x, 2) + pow (rsu_pos_y - v_pos_y, 2));
@@ -447,6 +449,8 @@ double calc_rsu_connection_time (Ptr<TraciClient> sumoClient, Ptr<MobilityModel>
       double betha = asin (v2rsuDist * sin (theta) / RADIUS);
       double alpha = PI - theta - betha;
       double dist = sqrt (v2rsuDist*v2rsuDist + RADIUS*RADIUS - 2*v2rsuDist*RADIUS*cos(alpha));
+      
+      if (v_speed<=0) v_speed = 0.001; 
       c_time = dist / v_speed;
       //   std::cout << " distance: = " << v2rsuDist << std::endl;
       //   std::cout << " theta: = " << RAD2DEG * theta << std::endl;
@@ -484,11 +488,10 @@ void send_data_to_plugin (  ns3::Time interval          ,
     msg_data.flow_lte   =   g_flow_lte  ;
     msg_data.flow_wlan  =   g_flow_wlan ;       
 
-
     /// 2. Write PHY data of each link, if connected
     //    check if in coverage area of rsu and eNb (receive cam in last sec)
     /* 
-     Get RSU position : As the position must be specified in (lat, lon), we must
+     Get RSU position: As the position must be specified in (lat, lon), we must
      take it from the mobility model and then  convert it to Latitude and Longitude
      As SUMO is used here, we can rely on the TraCIAPI for this conversion
     */
@@ -498,7 +501,8 @@ void send_data_to_plugin (  ns3::Time interval          ,
             rsu_mob->GetPosition ().x, rsu_mob->GetPosition ().y);
         g_phy_wlan.pos_lat = rsuPos.x;
         g_phy_wlan.pos_lon = rsuPos.y;
-        
+        g_phy_wlan.dweel_time = calc_rsu_connection_time (sumoClient, rsu_mob);
+        g_phy_wlan.cost = SSPI_LINK_COST_MAX * 0.2;          
         msg_data.phy_wlan = g_phy_wlan;
     }
 
@@ -507,7 +511,8 @@ void send_data_to_plugin (  ns3::Time interval          ,
             eNb_mob->GetPosition ().x, eNb_mob->GetPosition ().y);
         g_phy_lte.pos_lat = eNbPos.x;
         g_phy_lte.pos_lon = eNbPos.y;
-        
+        g_phy_lte.dweel_time = 100.0; // some high value for lte 
+        g_phy_lte.cost  = SSPI_LINK_COST_MAX * 0.8; 
         msg_data.phy_lte = g_phy_lte;
     }
 
@@ -533,6 +538,7 @@ void send_data_to_plugin (  ns3::Time interval          ,
     std::cout << "\t lat: = \t\t\t" << msg_data.phy_lte.pos_lat << "\t\t" << msg_data.phy_wlan.pos_lat << std::endl;
     std::cout << "\t lon: = \t\t\t" << msg_data.phy_lte.pos_lon << "\t\t" << msg_data.phy_wlan.pos_lon << std::endl;
     std::cout << "\t connected: = \t\t\t" << msg_data.phy_lte.is_connected << "\t\t" << msg_data.phy_wlan.is_connected << std::endl;
+    std::cout << "\t dweel time: = \t\t\t" << msg_data.phy_lte.dweel_time << "\t\t" << msg_data.phy_wlan.dweel_time << std::endl;
     
     std::cout  << std::endl;
 
@@ -543,13 +549,10 @@ void send_data_to_plugin (  ns3::Time interval          ,
     std::cout << "\t v_angle: = \t\t\t" << msg_data.veh.angle << std::endl;
     
     std::cout << "\t timestamp : = \t\t\t" << msg_data.timestamp_ms << std::endl;
-
-    double c_time = calc_rsu_connection_time (sumoClient, rsu_mob); 
-    std::cout << "\t conn time : = \t\t\t" << c_time << std::endl;
     std::cout  << "---------------------------------------------------------" <<std::endl;
   	
-	// send message to plugin
-    // mptcpd_data_write (msg_data);
+	  // send message to plugin
+    mptcpd_data_write (msg_data);
 	
   	Simulator::Schedule (interval, &send_data_to_plugin, interval, rsu_mob, eNb_mob, sumoClient,
                        fmhelper, flowMon); 
@@ -587,8 +590,9 @@ MonitorSniffRx (Ptr<const Packet> packet, uint16_t channelFreqMhz, WifiTxVector 
     // filter RSU cams by mac .. TODO - Improve ? 
     Mac48Address rsu_mac ("00:00:00:00:00:02"); 
     if (rsu_mac == hdr.GetAddr2()){
-        g_phy_wlan.signal     =   signalNoise.signal  ;
-        g_phy_wlan.noise      =   signalNoise.noise   ;
+        double alpha = 0.25; // alpha value for silmple LPF
+        g_phy_wlan.signal     =   alpha*signalNoise.signal + (1 - alpha) * g_phy_wlan.signal;
+        g_phy_wlan.noise      =   alpha*signalNoise.noise  + (1 - alpha) * g_phy_wlan.noise;
         g_phy_wlan.is_connected = true; 
         g_time_last_cam = Simulator::Now ();
     }
