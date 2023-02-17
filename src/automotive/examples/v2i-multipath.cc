@@ -52,11 +52,13 @@
 #include "/home/vad/mptcpd/include/mptcpd/mptcp_ns3.h"
 #include <fcntl.h>
 
+// #define DEBUG_MODE
+
 using namespace ns3;
 /* we run in real-time , so no loggin is avilable  */
 //NS_LOG_COMPONENT_DEFINE ("MpFdExample");
 
-#define MAX_VEH_SPEED       120 // km/h
+#define MAX_VEH_SPEED       100 // km/h
 #define MIN_VEH_SPEED       10  // Km/h
 #define MAX_JITTER          100 // ms
 
@@ -168,9 +170,15 @@ PrintVehicleData ( Ptr<TraciClient> sumoClient){
 
 void ChangeVehicleSpeed (Ptr<TraciClient> sumoClient, uint32_t interval){
   
+
+  // Ptr<NormalRandomVariable> x = CreateObject<NormalRandomVariable> ();
+  // x->SetAttribute ("Mean", DoubleValue (50.0));
+  // x->SetAttribute ("Variance", DoubleValue (20));
+
   Ptr<UniformRandomVariable> x = CreateObject<UniformRandomVariable> ();
   x->SetAttribute ("Min", DoubleValue (MIN_VEH_SPEED));
   x->SetAttribute ("Max", DoubleValue (MAX_VEH_SPEED));
+
   double newMaxSpeed = x->GetValue();  
   
   std::cout << "New " << g_vId  << "  max speed:"
@@ -526,6 +534,8 @@ void send_data_to_plugin (  ns3::Time interval          ,
     msg_data.timestamp_ms  =  Simulator::Now().GetMilliSeconds();  
 
     // print current metrics 
+
+    #ifdef DEBUG_MODE
     std::cout <<  "\t delay: = \t\t\t"    << msg_data.flow_lte.delay     <<"\t\t" << msg_data.flow_wlan.delay     << std::endl; 
     std::cout << "\t jitter: = \t\t\t"    << msg_data.flow_lte.jitter    <<"\t\t" << msg_data.flow_wlan.jitter    << std::endl; 
     std::cout << "\t plr: = \t\t\t"       << msg_data.flow_lte.plr       <<"\t\t" << msg_data.flow_wlan.plr       << std::endl; 
@@ -550,7 +560,8 @@ void send_data_to_plugin (  ns3::Time interval          ,
     
     std::cout << "\t timestamp : = \t\t\t" << msg_data.timestamp_ms << std::endl;
     std::cout  << "---------------------------------------------------------" <<std::endl;
-  	
+  	#endif
+
 	  // send message to plugin
     mptcpd_data_write (msg_data);
 	

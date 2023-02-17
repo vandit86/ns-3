@@ -71,9 +71,9 @@ ip netns exec right ip route add 11.0.0.0/8 via 13.0.0.1 dev eth0
 ip netns exec right ethtool --offload  eth0  rx off  tx off
 ip netns exec right ethtool --offload  eth1  rx off  tx off
 
-# tc add delay to interface
-ip netns exec right tc qdisc add dev eth0 root netem delay 55ms
-ip netns exec right tc qdisc add dev eth1 root netem delay 20ms
+# tc add delay to interfaces on right namespace 
+# ip netns exec right tc qdisc add dev eth0 root netem delay 5ms      # LTE 16 ms already included 
+ip netns exec right tc qdisc add dev eth1 root netem delay 50ms     # WLAN
 
 # *********************************************** # 
 #    configure mptcp path manager by iproute2     #
@@ -92,8 +92,11 @@ ip netns exec right ip mptcp endpoint add 14.0.0.2 dev eth1 id 2 signal
 # Just define endpoint for client (UE) and enadle userspace PM 
 ip netns exec left sysctl -w  net.mptcp.pm_type=1
 #ip netns exec left echo 1 > /proc/sys/net/mptcp/pm_type
+#ip netns exec left echo 10 > /proc/sys/net/mptcp/stale_loss_cnt
 ip netns exec left ip mptcp endpoint add 11.0.0.2 dev eth0 id 1  
 ip netns exec left ip mptcp endpoint add 15.0.0.2 dev eth1 id 2  
     
 ## start iperf/ncat server on right node 
 ip netns exec right /home/vad/mptcp-tools/use_mptcp/use_mptcp.sh iperf -s -D
+
+
